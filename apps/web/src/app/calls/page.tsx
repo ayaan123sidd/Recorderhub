@@ -625,6 +625,17 @@ function SalestrailCallsInner() {
 
       if (currentFilters.repCategory === 'Individual' && currentFilters.subFilter !== 'All Counselors') {
         params.set('agentName', currentFilters.subFilter);
+        const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const target = norm(currentFilters.subFilter);
+        const matched = (counselorsList || []).find((c) => {
+          const full = norm(`${c.firstName || ''} ${c.lastName || ''}`);
+          const first = norm(c.firstName || '');
+          const em = norm(c.email || '');
+          return full === target || em === target || (first === target && !c.lastName);
+        });
+        if (matched?.email) {
+          params.set('counselorEmail', matched.email);
+        }
       } else if (currentFilters.repCategory === 'Teams' && currentFilters.subFilter !== 'All Teams') {
         params.set('team', currentFilters.subFilter);
       }
@@ -744,33 +755,36 @@ function SalestrailCallsInner() {
 
   const resolveCounselorName = (call: any) => {
     // 1. Match by counselor email in counselorsList directory
-    const callEmail = (call.counselorEmail || call.email || '').toLowerCase();
+    const callEmail = (call.counselorEmail || call.email || '').toLowerCase().trim();
     if (callEmail && counselorsList.length > 0) {
-      const user = counselorsList.find((u) => u.email?.toLowerCase() === callEmail);
+      const user = counselorsList.find((u) => (u.email || '').toLowerCase().trim() === callEmail);
       if (user) {
-        const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const fullName = `${(user.firstName || '').trim()} ${(user.lastName || '').trim()}`.replace(/\s+/g, ' ').trim();
         if (fullName) return fullName;
       }
     }
 
     // 2. Match device ID or agent name alias with directory email
     if (counselorsList.length > 0) {
-      const rawName = (call.agentName || call.counselorName || '').toLowerCase().trim();
+      const rawName = (call.agentName || call.counselorName || '').toLowerCase().replace(/\s+/g, ' ').trim();
       if (rawName && rawName !== 'counselor agent' && rawName !== 'counselor') {
         const user = counselorsList.find((u) => {
           const prefix = u.email ? u.email.split('@')[0].toLowerCase().trim() : '';
           const fName = (u.firstName || '').toLowerCase().trim();
-          const fullName = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().trim();
-          return (fName && rawName === fName) || (fullName && rawName === fullName) || (prefix && rawName === prefix);
+          const fullName = `${(u.firstName || '').trim()} ${(u.lastName || '').trim()}`.toLowerCase().replace(/\s+/g, ' ').trim();
+          if (fullName && rawName === fullName) return true;
+          if (prefix && rawName === prefix) return true;
+          if (fName && !u.lastName && rawName === fName) return true;
+          return false;
         });
         if (user) {
-          const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+          const fullName = `${(user.firstName || '').trim()} ${(user.lastName || '').trim()}`.replace(/\s+/g, ' ').trim();
           if (fullName) return fullName;
         }
       }
     }
 
-    const rawName = call.agentName || call.counselorName || call.userName || call.user || '';
+    const rawName = (call.agentName || call.counselorName || call.userName || call.user || '').replace(/\s+/g, ' ').trim();
     if (rawName && rawName !== 'Counselor Agent' && rawName !== 'Counselor' && !rawName.startsWith('ANDROID-')) {
       return rawName;
     }
@@ -986,13 +1000,14 @@ function SalestrailCallsInner() {
 
     // 1. From counselorsList (all provisioned users)
     (counselorsList || []).forEach((c) => {
-      const full = `${c.firstName || ''} ${c.lastName || ''}`.trim();
+      const full = `${(c.firstName || '').trim()} ${(c.lastName || '').trim()}`.replace(/\s+/g, ' ').trim();
       if (full) {
         names.add(full);
         allKnownCounselorsRef.current.add(full);
       } else if (c.name) {
-        names.add(c.name.trim());
-        allKnownCounselorsRef.current.add(c.name.trim());
+        const cleaned = c.name.replace(/\s+/g, ' ').trim();
+        names.add(cleaned);
+        allKnownCounselorsRef.current.add(cleaned);
       } else if (c.email) {
         const prefix = c.email.split('@')[0];
         const formatted = prefix.replace(/[._]/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
@@ -1219,6 +1234,17 @@ function SalestrailCallsInner() {
 
       if (repCategory === 'Individual' && subFilter !== 'All Counselors') {
         params.set('agentName', subFilter);
+        const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const target = norm(subFilter);
+        const matched = (counselorsList || []).find((c) => {
+          const full = norm(`${c.firstName || ''} ${c.lastName || ''}`);
+          const first = norm(c.firstName || '');
+          const em = norm(c.email || '');
+          return full === target || em === target || (first === target && !c.lastName);
+        });
+        if (matched?.email) {
+          params.set('counselorEmail', matched.email);
+        }
       } else if (repCategory === 'Teams' && subFilter !== 'All Teams') {
         params.set('team', subFilter);
       }

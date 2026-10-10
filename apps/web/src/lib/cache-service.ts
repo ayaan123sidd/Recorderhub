@@ -336,9 +336,11 @@ export async function queryCallsFromDb(filters: {
       const query: any = {};
 
       if (filters.counselorEmail) {
-        query.counselorEmail = filters.counselorEmail.toLowerCase().trim();
+        const escEmail = filters.counselorEmail.toLowerCase().trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        query.counselorEmail = { $regex: `^${escEmail}$`, $options: 'i' };
       } else if (filters.agentName) {
-        query.agentName = filters.agentName.trim();
+        const escAgent = filters.agentName.trim().split(/\s+/).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
+        query.agentName = { $regex: `^${escAgent}$`, $options: 'i' };
       }
 
       if (filters.team) {

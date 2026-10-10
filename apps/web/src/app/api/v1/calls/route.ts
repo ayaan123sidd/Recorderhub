@@ -97,24 +97,84 @@ export async function GET(req: Request) {
     }
 
     // Counselor / Agent filter
-    if (counselorEmail) {
-      andConditions.push({ counselorEmail: counselorEmail.toLowerCase().trim() });
-    } else if (agentName && agentName !== 'All Counselors') {
-      const cleanAgent = agentName.trim();
-      const tokens = cleanAgent.split(/\s+/).filter((t) => t.length >= 3);
-      const orClauses: any[] = [
-        { agentName: { $regex: cleanAgent, $options: 'i' } },
-        { counselorEmail: { $regex: cleanAgent, $options: 'i' } },
-        { counselorName: { $regex: cleanAgent, $options: 'i' } },
-        { userName: { $regex: cleanAgent, $options: 'i' } },
-        { user: { $regex: cleanAgent, $options: 'i' } },
-      ];
-      tokens.forEach((token) => {
-        orClauses.push({ agentName: { $regex: token, $options: 'i' } });
-        orClauses.push({ counselorEmail: { $regex: token, $options: 'i' } });
-        orClauses.push({ counselorName: { $regex: token, $options: 'i' } });
+    if (counselorEmail || (agentName && agentName !== 'All Counselors')) {
+      const cleanEmail = (counselorEmail || '').toLowerCase().trim();
+      const cleanAgent = (agentName && agentName !== 'All Counselors') ? agentName.trim() : '';
+
+      const escapedAgentPattern = cleanAgent
+        ? cleanAgent.split(/\s+/).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+')
+        : '';
+
+      const userQueryClauses: any[] = [];
+      if (cleanEmail) {
+        const escEmail = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        userQueryClauses.push({ email: { $regex: `^${escEmail}$`, $options: 'i' } });
+      }
+      if (cleanAgent) {
+        userQueryClauses.push(
+          { email: { $regex: `^${cleanAgent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $concat: [{ $ifNull: ['$firstName', ''] }, ' ', { $ifNull: ['$lastName', ''] }] },
+                regex: `^\\s*${escapedAgentPattern}\\s*$`,
+                options: 'i',
+              },
+            },
+          },
+          { firstName: { $regex: `^${cleanAgent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } }
+        );
+      }
+
+      const userDocs = userQueryClauses.length > 0
+        ? await (UserModel as any).find({ $or: userQueryClauses }).select('email _id firstName lastName').lean().exec()
+        : [];
+
+      const matchedEmails = new Set<string>();
+      if (cleanEmail) matchedEmails.add(cleanEmail);
+      userDocs.forEach((u: any) => {
+        if (u.email) matchedEmails.add(u.email.toLowerCase().trim());
       });
-      andConditions.push({ $or: orClauses });
+
+      const matchedUserIds = userDocs.map((u: any) => u._id ? u._id.toString() : '').filter(Boolean);
+
+      const deviceQueryClauses: any[] = [];
+      if (escapedAgentPattern) {
+        deviceQueryClauses.push({ agentName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } });
+      }
+      if (matchedUserIds.length > 0) {
+        deviceQueryClauses.push({ userId: { $in: matchedUserIds } });
+      }
+      if (matchedEmails.size > 0) {
+        deviceQueryClauses.push({ counselorEmail: { $in: Array.from(matchedEmails) } });
+      }
+
+      const deviceDocs = deviceQueryClauses.length > 0
+        ? await (DeviceModel as any).find({ $or: deviceQueryClauses }).select('deviceId').lean().exec()
+        : [];
+
+      const matchedDeviceIds = deviceDocs.map((d: any) => d.deviceId).filter(Boolean);
+
+      const orClauses: any[] = [];
+      if (escapedAgentPattern) {
+        orClauses.push(
+          { agentName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } },
+          { counselorName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } }
+        );
+      }
+
+      matchedEmails.forEach((em: string) => {
+        const esc = em.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        orClauses.push({ counselorEmail: { $regex: `^${esc}$`, $options: 'i' } });
+      });
+
+      if (matchedDeviceIds.length > 0) {
+        orClauses.push({ deviceId: { $in: matchedDeviceIds } });
+      }
+
+      if (orClauses.length > 0) {
+        andConditions.push({ $or: orClauses });
+      }
     }
 
     // Team filter (resolves team members dynamically from Team and User models)

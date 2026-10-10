@@ -99,7 +99,18 @@ export default function RecorderHubDashboard() {
       if (customEndDate) params.set('endDate', customEndDate);
       if (salesRepFilter === 'Individual' || salesRepFilter === 'Counselors') {
         if (teamFilter && teamFilter !== 'All Counselors') {
-          params.set('counselorEmail', teamFilter);
+          params.set('agentName', teamFilter);
+          const norm = (s: string) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          const target = norm(teamFilter);
+          const matched = (counselorsList || []).find((c) => {
+            const full = norm(`${c.firstName || ''} ${c.lastName || ''}`);
+            const first = norm(c.firstName || '');
+            const em = norm(c.email || '');
+            return full === target || em === target || (first === target && !c.lastName);
+          });
+          if (matched?.email) {
+            params.set('counselorEmail', matched.email);
+          }
         }
       } else if (salesRepFilter === 'Teams') {
         if (teamFilter && teamFilter !== 'All Teams') {
@@ -335,25 +346,28 @@ export default function RecorderHubDashboard() {
     // 1. Match by counselor email in counselorsList directory
     const callEmail = (c.counselorEmail || c.email || '').toLowerCase().trim();
     if (callEmail && counselorsList.length > 0) {
-      const user = counselorsList.find((u) => u.email?.toLowerCase().trim() === callEmail);
+      const user = counselorsList.find((u) => (u.email || '').toLowerCase().trim() === callEmail);
       if (user) {
-        const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+        const fullName = `${(user.firstName || '').trim()} ${(user.lastName || '').trim()}`.replace(/\s+/g, ' ').trim();
         if (fullName) return fullName;
       }
     }
 
     // 2. Exact match on agent name or alias
     if (counselorsList.length > 0) {
-      const rawName = (c.agentName || c.counselorName || '').toLowerCase().trim();
+      const rawName = (c.agentName || c.counselorName || '').toLowerCase().replace(/\s+/g, ' ').trim();
       if (rawName && rawName !== 'counselor agent' && rawName !== 'counselor') {
         const user = counselorsList.find((u) => {
           const prefix = u.email ? u.email.split('@')[0].toLowerCase().trim() : '';
           const fName = (u.firstName || '').toLowerCase().trim();
-          const fullName = `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().trim();
-          return (fName && rawName === fName) || (fullName && rawName === fullName) || (prefix && rawName === prefix);
+          const fullName = `${(u.firstName || '').trim()} ${(u.lastName || '').trim()}`.toLowerCase().replace(/\s+/g, ' ').trim();
+          if (fullName && rawName === fullName) return true;
+          if (prefix && rawName === prefix) return true;
+          if (fName && !u.lastName && rawName === fName) return true;
+          return false;
         });
         if (user) {
-          const fullName = `${user.firstName || ''} ${user.lastName || ''}`.trim();
+          const fullName = `${(user.firstName || '').trim()} ${(user.lastName || '').trim()}`.replace(/\s+/g, ' ').trim();
           if (fullName) return fullName;
         }
       }
@@ -361,7 +375,7 @@ export default function RecorderHubDashboard() {
 
     const email = c.counselorEmail || c.email;
     const derivedName = email ? email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()) : null;
-    const rawAgentName = (c.agentName && c.agentName !== 'Sachin Negi' && c.agentName !== 'Counselor' && c.agentName !== 'Counselor Agent') ? c.agentName : null;
+    const rawAgentName = (c.agentName && c.agentName !== 'Sachin Negi' && c.agentName !== 'Counselor' && c.agentName !== 'Counselor Agent') ? c.agentName.replace(/\s+/g, ' ').trim() : null;
     const cleanDev = c.deviceId ? c.deviceId.replace(/^ANDROID-/, '').split('-')[0] : '';
     return rawAgentName || c.counselorName || derivedName || (cleanDev ? `Counselor (${cleanDev})` : 'Counselor Agent');
   };
@@ -625,28 +639,26 @@ export default function RecorderHubDashboard() {
     // Sales Rep / Team Filter
     if (salesRepFilter === 'Individual' || salesRepFilter === 'Counselors') {
       if (teamFilter && teamFilter !== 'All Counselors') {
-        const targetLower = teamFilter.toLowerCase().trim();
-        const userLower = resolveCounselorName(c).toLowerCase().trim();
+        const targetClean = teamFilter.replace(/\s+/g, ' ').trim().toLowerCase();
+        const userClean = resolveCounselorName(c).replace(/\s+/g, ' ').trim().toLowerCase();
         const callEmail = (c.counselorEmail || c.email || '').toLowerCase().trim();
-        const agentName = (c.agentName || c.counselorName || '').toLowerCase().trim();
+        const agentNameClean = (c.agentName || c.counselorName || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-        const targetCounselor = (counselorsList || []).find((c) => {
-          const fn = `${c.firstName || ''} ${c.lastName || ''}`.trim().toLowerCase();
-          const f1 = (c.firstName || '').trim().toLowerCase();
-          const em = (c.email || '').trim().toLowerCase();
-          return fn === targetLower || f1 === targetLower || em === targetLower;
+        const targetCounselor = (counselorsList || []).find((u) => {
+          const fn = `${(u.firstName || '').trim()} ${(u.lastName || '').trim()}`.replace(/\s+/g, ' ').trim().toLowerCase();
+          const f1 = (u.firstName || '').trim().toLowerCase();
+          const em = (u.email || '').trim().toLowerCase();
+          return fn === targetClean || em === targetClean || (f1 === targetClean && !u.lastName);
         });
 
         const targetEmail = targetCounselor?.email?.toLowerCase().trim();
-        const targetFullName = targetCounselor ? `${targetCounselor.firstName || ''} ${targetCounselor.lastName || ''}`.trim().toLowerCase() : '';
-        const targetFirstName = targetCounselor?.firstName?.toLowerCase().trim();
+        const targetFullName = targetCounselor ? `${(targetCounselor.firstName || '').trim()} ${(targetCounselor.lastName || '').trim()}`.replace(/\s+/g, ' ').trim().toLowerCase() : '';
 
         const matchesIndividual =
-          userLower === targetLower ||
-          (targetFullName && userLower === targetFullName) ||
-          (targetFirstName && userLower === targetFirstName) ||
+          userClean === targetClean ||
+          (targetFullName && userClean === targetFullName) ||
           (targetEmail && callEmail && callEmail === targetEmail) ||
-          (agentName && (agentName === targetLower || (targetFirstName && agentName === targetFirstName) || (targetFullName && agentName === targetFullName)));
+          (agentNameClean && (agentNameClean === targetClean || (targetFullName && agentNameClean === targetFullName)));
 
         if (!matchesIndividual) {
           return false;

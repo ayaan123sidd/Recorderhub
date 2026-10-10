@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase, withDbRetry } from '@/lib/db';
-import { CallModel, UserModel, TeamModel } from '@/lib/models';
+import { CallModel, UserModel, TeamModel, DeviceModel } from '@/lib/models';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { DASHBOARD_SUMMARY_CACHE_KEY, DASHBOARD_SUMMARY_CACHE_TTL } from '@/lib/cache-service';
 
@@ -25,10 +25,11 @@ export async function GET(req: Request) {
     const startDateParam = searchParams.get('startDate') || searchParams.get('from');
     const endDateParam = searchParams.get('endDate') || searchParams.get('to');
     const counselorEmail = searchParams.get('counselorEmail') || searchParams.get('email');
+    const agentName = searchParams.get('agentName');
     const team = searchParams.get('team');
     const channel = searchParams.get('channel');
 
-    const cacheKey = `summary:${dateRange}:${startDateParam || ''}:${endDateParam || ''}:${counselorEmail || ''}:${team || ''}:${channel || ''}`;
+    const cacheKey = `summary:${dateRange}:${startDateParam || ''}:${endDateParam || ''}:${counselorEmail || ''}:${agentName || ''}:${team || ''}:${channel || ''}`;
     const cached = await cacheGet<any>(cacheKey);
     if (cached) {
       const res = NextResponse.json(cached);
@@ -80,8 +81,85 @@ export async function GET(req: Request) {
       }
     }
 
-    if (counselorEmail) {
-      andConditions.push({ counselorEmail: counselorEmail.toLowerCase().trim() });
+    // Counselor / Agent filter
+    if (counselorEmail || (agentName && agentName !== 'All Counselors')) {
+      const cleanEmail = (counselorEmail || '').toLowerCase().trim();
+      const cleanAgent = (agentName && agentName !== 'All Counselors') ? agentName.trim() : '';
+
+      const escapedAgentPattern = cleanAgent
+        ? cleanAgent.split(/\s+/).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+')
+        : '';
+
+      const userQueryClauses: any[] = [];
+      if (cleanEmail) {
+        const escEmail = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        userQueryClauses.push({ email: { $regex: `^${escEmail}$`, $options: 'i' } });
+      }
+      if (cleanAgent) {
+        userQueryClauses.push(
+          { email: { $regex: `^${cleanAgent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $concat: [{ $ifNull: ['$firstName', ''] }, ' ', { $ifNull: ['$lastName', ''] }] },
+                regex: `^\\s*${escapedAgentPattern}\\s*$`,
+                options: 'i',
+              },
+            },
+          },
+          { firstName: { $regex: `^${cleanAgent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } }
+        );
+      }
+
+      const userDocs = userQueryClauses.length > 0
+        ? await (UserModel as any).find({ $or: userQueryClauses }).select('email _id firstName lastName').lean().exec()
+        : [];
+
+      const matchedEmails = new Set<string>();
+      if (cleanEmail) matchedEmails.add(cleanEmail);
+      userDocs.forEach((u: any) => {
+        if (u.email) matchedEmails.add(u.email.toLowerCase().trim());
+      });
+
+      const matchedUserIds = userDocs.map((u: any) => u._id ? u._id.toString() : '').filter(Boolean);
+
+      const deviceQueryClauses: any[] = [];
+      if (escapedAgentPattern) {
+        deviceQueryClauses.push({ agentName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } });
+      }
+      if (matchedUserIds.length > 0) {
+        deviceQueryClauses.push({ userId: { $in: matchedUserIds } });
+      }
+      if (matchedEmails.size > 0) {
+        deviceQueryClauses.push({ counselorEmail: { $in: Array.from(matchedEmails) } });
+      }
+
+      const deviceDocs = deviceQueryClauses.length > 0
+        ? await (DeviceModel as any).find({ $or: deviceQueryClauses }).select('deviceId').lean().exec()
+        : [];
+
+      const matchedDeviceIds = deviceDocs.map((d: any) => d.deviceId).filter(Boolean);
+
+      const orClauses: any[] = [];
+      if (escapedAgentPattern) {
+        orClauses.push(
+          { agentName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } },
+          { counselorName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } }
+        );
+      }
+
+      matchedEmails.forEach((em: string) => {
+        const esc = em.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        orClauses.push({ counselorEmail: { $regex: `^${esc}$`, $options: 'i' } });
+      });
+
+      if (matchedDeviceIds.length > 0) {
+        orClauses.push({ deviceId: { $in: matchedDeviceIds } });
+      }
+
+      if (orClauses.length > 0) {
+        andConditions.push({ $or: orClauses });
+      }
     }
     if (team && team !== 'All Teams') {
       const cleanTeam = team.trim();

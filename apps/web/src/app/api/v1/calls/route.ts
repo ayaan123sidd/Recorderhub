@@ -109,8 +109,7 @@ export async function GET(req: Request) {
       if (cleanEmail) {
         const escEmail = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         userQueryClauses.push({ email: { $regex: `^${escEmail}$`, $options: 'i' } });
-      }
-      if (cleanAgent) {
+      } else if (cleanAgent) {
         userQueryClauses.push(
           { email: { $regex: `^${cleanAgent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } },
           {
@@ -122,7 +121,10 @@ export async function GET(req: Request) {
               },
             },
           },
-          { firstName: { $regex: `^${cleanAgent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, $options: 'i' } }
+          {
+            firstName: { $regex: `^\\s*${escapedAgentPattern}\\s*$`, $options: 'i' },
+            $or: [{ lastName: { $exists: false } }, { lastName: '' }, { lastName: null }],
+          }
         );
       }
 
@@ -139,14 +141,14 @@ export async function GET(req: Request) {
       const matchedUserIds = userDocs.map((u: any) => u._id ? u._id.toString() : '').filter(Boolean);
 
       const deviceQueryClauses: any[] = [];
-      if (escapedAgentPattern) {
-        deviceQueryClauses.push({ agentName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } });
-      }
       if (matchedUserIds.length > 0) {
         deviceQueryClauses.push({ userId: { $in: matchedUserIds } });
       }
       if (matchedEmails.size > 0) {
         deviceQueryClauses.push({ counselorEmail: { $in: Array.from(matchedEmails) } });
+      }
+      if (deviceQueryClauses.length === 0 && escapedAgentPattern) {
+        deviceQueryClauses.push({ agentName: { $regex: `^\\s*${escapedAgentPattern}\\s*$`, $options: 'i' } });
       }
 
       const deviceDocs = deviceQueryClauses.length > 0
@@ -156,17 +158,19 @@ export async function GET(req: Request) {
       const matchedDeviceIds = deviceDocs.map((d: any) => d.deviceId).filter(Boolean);
 
       const orClauses: any[] = [];
-      if (escapedAgentPattern) {
-        orClauses.push(
-          { agentName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } },
-          { counselorName: { $regex: `^${escapedAgentPattern}$`, $options: 'i' } }
-        );
+      if (matchedEmails.size > 0) {
+        Array.from(matchedEmails).forEach((em: string) => {
+          const esc = em.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          orClauses.push({ counselorEmail: { $regex: `^${esc}$`, $options: 'i' } });
+        });
       }
 
-      matchedEmails.forEach((em: string) => {
-        const esc = em.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        orClauses.push({ counselorEmail: { $regex: `^${esc}$`, $options: 'i' } });
-      });
+      if (escapedAgentPattern) {
+        orClauses.push(
+          { agentName: { $regex: `^\\s*${escapedAgentPattern}\\s*$`, $options: 'i' } },
+          { counselorName: { $regex: `^\\s*${escapedAgentPattern}\\s*$`, $options: 'i' } }
+        );
+      }
 
       if (matchedDeviceIds.length > 0) {
         orClauses.push({ deviceId: { $in: matchedDeviceIds } });

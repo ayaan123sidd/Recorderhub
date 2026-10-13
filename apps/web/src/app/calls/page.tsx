@@ -1174,7 +1174,7 @@ function SalestrailCallsInner() {
       fetchCalls(currentPage, pageSize, sortField, sortOrder);
     }, 250);
     return () => clearTimeout(timer);
-  }, [searchQuery, dateRange, customStartDate, customEndDate, repCategory, subFilter, isRecordingsOnly, anomalyFilter, currentPage, pageSize]);
+  }, [searchQuery, dateRange, customStartDate, customEndDate, repCategory, subFilter, isRecordingsOnly, anomalyFilter, currentPage, pageSize, counselorsList]);
 
   const handleSort = (field: SortField) => {
     const newOrder = sortField === field ? (sortOrder === 'asc' ? 'desc' : 'asc') : (field === 'startTime' || field === 'duration' ? 'desc' : 'asc');

@@ -43,8 +43,7 @@ export async function deleteCounselorCascade(identifier: string) {
     callOrConditions.push({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
   }
   if (fullName && fullName !== 'Counselor Agent') {
-    const escapedFullName = fullName.split(/\s+/).map((t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-    callOrConditions.push({ agentName: { $regex: new RegExp(`^\\s*${escapedFullName}\\s*$`, 'i') } });
+    callOrConditions.push({ agentName: { $regex: new RegExp(`^${fullName}$`, 'i') } });
   }
   if (deviceIds.length > 0) {
     callOrConditions.push({ deviceId: { $in: deviceIds } });

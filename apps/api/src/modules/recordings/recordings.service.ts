@@ -21,7 +21,7 @@ export class RecordingsService {
     const region = process.env.AWS_REGION || 'ap-south-1';
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
     const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
-    this.s3Bucket = process.env.S3_BUCKET_NAME || 'academically-recorderhub';
+    this.s3Bucket = process.env.S3_BUCKET_NAME || 'recorderhub';
 
     if (accessKeyId && secretAccessKey) {
       this.s3Client = new S3Client({

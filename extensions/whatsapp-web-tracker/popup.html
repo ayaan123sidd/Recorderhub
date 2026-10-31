@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RecordHub WhatsApp Tracker</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">RecordHub</span>
+          <span class="brand-sub">WhatsApp Web Tracker v1.0.2</span>
+        </div>
+      </div>
+      <div id="connectionStatus" class="status-pill status-disconnected">
+        <span class="status-dot"></span>
+        <span id="statusText">Disconnected</span>
+      </div>
+    </header>
+
+    <!-- Login View (shown when not authenticated) -->
+    <section id="loginSection" class="view-section">
+      <div class="login-card">
+        <h3 class="section-title">Counselor Authentication</h3>
+        <p class="section-desc">Sign in with your RecordHub portal credentials to sync calls.</p>
+        
+        <form id="loginForm">
+          <div class="input-group">
+            <label for="serverUrl">RecordHub URL</label>
+            <input type="url" id="serverUrl" placeholder="https://your-recordhub-domain.com" required value="http://localhost:3000">
+          </div>
+          
+          <div class="input-group">
+            <label for="counselorEmail">Work Email</label>
+            <input type="email" id="counselorEmail" placeholder="counselor@academically.com" required>
+          </div>
+          
+          <div class="input-group">
+            <label for="counselorPass">Password</label>
+            <input type="password" id="counselorPass" placeholder="••••••••" required>
+          </div>
+
+          <div id="loginError" class="alert-error" style="display: none;"></div>
+
+          <button type="submit" id="loginBtn" class="btn btn-primary">
+            <span id="loginBtnText">Connect Extension</span>
+            <div id="loginSpinner" class="spinner" style="display: none;"></div>
+          </button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Main Active View (shown when logged in) -->
+    <section id="mainSection" class="view-section" style="display: none;">
+      <!-- Counselor Info Bar -->
+      <div class="counselor-bar">
+        <div class="counselor-info">
+          <span id="counselorNameDisplay" class="counselor-name">Counselor Agent</span>
+          <span id="counselorEmailDisplay" class="counselor-email">counselor@academically.com</span>
+        </div>
+        <button id="logoutBtn" class="btn-icon" title="Sign Out">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+            <polyline points="16 17 21 12 16 7"></polyline>
+            <line x1="21" y1="12" x2="9" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Live Call In Progress Banner -->
+      <div id="activeCallBanner" class="active-call-card" style="display: none;">
+        <div class="active-call-top">
+          <div class="live-tag">
+            <span class="live-dot"></span>
+            LIVE CALL
+          </div>
+          <span id="activeCallTimer" class="active-call-timer">00:00</span>
+        </div>
+        <div class="active-call-details">
+          <div id="activeCallContact" class="active-call-contact">Unknown Contact</div>
+          <div class="active-call-meta">
+            <span id="activeCallDirection" class="badge badge-outgoing">Outgoing</span>
+            <span class="badge badge-channel">WhatsApp Web</span>
+            <span id="activeCallRecBadge" class="badge badge-recording">Recording Audio</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sync & Options Bar -->
+      <div class="settings-card">
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-title">Auto-Record Audio</span>
+            <span class="setting-sub">Upload tab audio to S3 compliance bucket</span>
+          </div>
+          <label class="switch">
+            <input type="checkbox" id="autoRecordToggle" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="sync-row">
+          <div class="sync-info">
+            <span id="syncStatusLabel">All calls synchronized</span>
+            <span id="pendingBadge" class="badge-count" style="display: none;">0 pending</span>
+          </div>
+          <button id="forceSyncBtn" class="btn btn-secondary btn-sm">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+            Sync Now
+          </button>
+        </div>
+      </div>
+
+      <!-- Recent Captured Calls -->
+      <div class="history-card">
+        <div class="history-header">
+          <span class="history-title">Recent Web Calls</span>
+          <span id="callCountLabel" class="history-sub">0 logged</span>
+        </div>
+        <div id="recentCallsList" class="history-list">
+          <div class="empty-state">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <p>No WhatsApp Web calls tracked yet. Make or receive a call on WhatsApp Web to see it here.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <span>RecordHub v1.0 • Built for Compliance</span>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

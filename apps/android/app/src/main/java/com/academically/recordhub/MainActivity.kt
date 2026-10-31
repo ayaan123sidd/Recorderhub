@@ -338,4 +338,29 @@ class MainActivity : ComponentActivity() {
     private fun isNotificationListenerEnabled(context: Context): Boolean {
         return com.academically.recordhub.service.WhatsAppCallNotificationListener.isNotificationListenerEnabled(context)
     }
+
+    override fun onResume() {
+        super.onResume()
+        try {
+            val prefs = getSharedPreferences("recordhub_prefs", MODE_PRIVATE)
+            val isLoggedIn = prefs.getBoolean("is_logged_in", false)
+            if (isLoggedIn) {
+                // Auto-heal WhatsApp Notification Listener if disconnected
+                if (isNotificationListenerEnabled(this)) {
+                    if (!com.academically.recordhub.service.WhatsAppCallNotificationListener.isConnected ||
+                        com.academically.recordhub.service.WhatsAppCallNotificationListener.instance == null
+                    ) {
+                        AppLogManager.log("INFO", "WhatsApp", "Auto-healing WhatsApp listener on activity resume.")
+                        com.academically.recordhub.service.WhatsAppCallNotificationListener.triggerRebind(this)
+                    }
+                }
+
+                // Trigger immediate sync on app resume
+                triggerImmediateSync()
+            }
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Error in onResume: ${e.message}")
+        }
+    }
+
 }

@@ -30,6 +30,7 @@ import {
   Laptop
 } from 'lucide-react';
 import Link from 'next/link';
+import { isInternationalSimCall } from '@recordhub/shared';
 
 export default function RecorderHubDashboard() {
   const { role: userRole, email: userEmail, isSuperAdmin, isAdmin, isManager, isTeamLead: rawIsTeamLead, isCounselor: rawIsCounselor } = useUserRole();
@@ -47,7 +48,7 @@ export default function RecorderHubDashboard() {
   const [dashboardOpensToday, setDashboardOpensToday] = useState<number>(0);
   const [expandedSessions, setExpandedSessions] = useState<Record<string, boolean>>({});
 
-  type DashSortField = 'name' | 'total' | 'answered' | 'unanswered' | 'whatsapp' | 'duration' | 'uniqueCalls' | 'uniqueAnswered';
+  type DashSortField = 'name' | 'total' | 'answered' | 'unanswered' | 'whatsapp' | 'internationalSim' | 'duration' | 'uniqueCalls' | 'uniqueAnswered';
   const [dashSortField, setDashSortField] = useState<DashSortField>('total');
   const [dashSortOrder, setDashSortOrder] = useState<'asc' | 'desc'>('desc');
 
@@ -774,6 +775,9 @@ export default function RecorderHubDashboard() {
   const outboundCount = summaryData ? summaryData.outboundCalls : validCalls.filter((c) => (c?.direction || '').toUpperCase() === 'OUTGOING' || (c?.direction || '').toUpperCase() === 'OUTBOUND').length;
   const inboundCount = summaryData ? summaryData.inboundCalls : validCalls.filter((c) => (c?.direction || '').toUpperCase() === 'INCOMING' || (c?.direction || '').toUpperCase() === 'INBOUND').length;
   const answeredCount = summaryData ? summaryData.answeredCalls : validCalls.filter((c) => (c?.status || '').toUpperCase() === 'ANSWERED').length;
+  const internationalSimCount = summaryData
+    ? (summaryData.internationalSimCalls || 0)
+    : validCalls.filter(isInternationalSimCall).length;
 
   const totalSeconds = summaryData ? summaryData.totalDuration : validCalls.reduce((sum, c) => {
     const isAns = (c?.status || 'ANSWERED').toUpperCase() === 'ANSWERED';
@@ -879,6 +883,7 @@ export default function RecorderHubDashboard() {
     answered: number;
     unanswered: number;
     whatsapp: number;
+    internationalSim: number;
     totalSeconds: number;
     uniquePhones: Set<string>;
     uniqueAnsweredPhones: Set<string>;
@@ -893,6 +898,7 @@ export default function RecorderHubDashboard() {
         answered: 0,
         unanswered: 0,
         whatsapp: 0,
+        internationalSim: 0,
         totalSeconds: 0,
         uniquePhones: new Set<string>(),
         uniqueAnsweredPhones: new Set<string>(),
@@ -924,6 +930,7 @@ export default function RecorderHubDashboard() {
           answered: 0,
           unanswered: 0,
           whatsapp: 0,
+          internationalSim: 0,
           totalSeconds: 0,
           uniquePhones: new Set<string>(),
           uniqueAnsweredPhones: new Set<string>(),
@@ -935,6 +942,7 @@ export default function RecorderHubDashboard() {
       entry.answered += (item.answeredCalls || 0);
       entry.unanswered += (item.unansweredCalls || 0);
       entry.whatsapp += (item.whatsappCalls || 0);
+      entry.internationalSim += (item.internationalSimCalls || 0);
       entry.totalSeconds += (item.durationSeconds || 0);
     });
   } else {
@@ -969,6 +977,7 @@ export default function RecorderHubDashboard() {
             answered: 0,
             unanswered: 0,
             whatsapp: 0,
+            internationalSim: 0,
             totalSeconds: 0,
             uniquePhones: new Set<string>(),
             uniqueAnsweredPhones: new Set<string>(),
@@ -992,6 +1001,9 @@ export default function RecorderHubDashboard() {
       if (isWA) {
         entry.whatsapp += 1;
       }
+      if (isInternationalSimCall(c)) {
+        entry.internationalSim += 1;
+      }
 
       const rawPhone = c.phoneNumber || c.phoneNumberMasked || c.leadId || '';
       const normPhone = normalizePhoneNumber(rawPhone);
@@ -1011,6 +1023,7 @@ export default function RecorderHubDashboard() {
       answered: u.answered,
       unanswered: u.unanswered,
       whatsapp: u.whatsapp,
+      internationalSim: u.internationalSim,
       totalSeconds: u.totalSeconds,
       durationStr: formatReportDuration(u.totalSeconds),
       uniqueCalls: u.uniquePhones.size || (u.total > 0 ? u.total : 0),
@@ -1036,6 +1049,9 @@ export default function RecorderHubDashboard() {
       case 'whatsapp':
         cmp = a.whatsapp - b.whatsapp;
         break;
+      case 'internationalSim':
+        cmp = a.internationalSim - b.internationalSim;
+        break;
       case 'duration':
         cmp = a.totalSeconds - b.totalSeconds;
         break;
@@ -1055,15 +1071,16 @@ export default function RecorderHubDashboard() {
       return;
     }
 
-    // Build worksheet data matching reference photo columns with WhatsApp Calls
+    // Keep report columns aligned with the counselor analytics table.
     const worksheetData = [
-      ['Name', 'Total', 'Answered', 'Unanswered', 'WhatsApp Calls', 'Duration', 'Unique Calls', 'Answered Calls'],
+      ['Name', 'Total', 'Answered', 'Unanswered', 'WhatsApp Calls', 'International SIM Calls', 'Duration', 'Unique Calls', 'Answered Calls'],
       ...userActivityRows.map((r) => [
         r.name,
         r.total,
         r.answered,
         r.unanswered,
         r.whatsapp,
+        r.internationalSim,
         r.durationStr,
         r.uniqueCalls,
         r.uniqueAnswered,
@@ -1079,6 +1096,7 @@ export default function RecorderHubDashboard() {
       { wch: 12 }, // Answered
       { wch: 14 }, // Unanswered
       { wch: 16 }, // WhatsApp Calls
+      { wch: 24 }, // International SIM Calls
       { wch: 16 }, // Duration
       { wch: 15 }, // Unique Calls
       { wch: 16 }, // Answered Calls
@@ -1133,13 +1151,14 @@ export default function RecorderHubDashboard() {
       }).catch(() => {});
     } catch (e) {}
 
-    const headers = ['Name', 'Total', 'Answered', 'Unanswered', 'WhatsApp Calls', 'Duration', 'Unique Calls', 'Answered Calls'];
+    const headers = ['Name', 'Total', 'Answered', 'Unanswered', 'WhatsApp Calls', 'International SIM Calls', 'Duration', 'Unique Calls', 'Answered Calls'];
     const rows = userActivityRows.map((r) => [
       `"${(r.name || '').replace(/"/g, '""')}"`,
       r.total,
       r.answered,
       r.unanswered,
       r.whatsapp,
+      r.internationalSim,
       `"${r.durationStr}"`,
       r.uniqueCalls,
       r.uniqueAnswered,
@@ -1609,6 +1628,15 @@ export default function RecorderHubDashboard() {
                     <span className="block text-sm font-semibold text-slate-700 mt-2">Answered calls</span>
                   </div>
 
+                  {/* International outbound cellular calls */}
+                  <div className="p-4 bg-sky-50 rounded-xl border border-sky-100">
+                    <span className="block text-4xl font-black text-sky-900 tracking-tight leading-none">
+                      {internationalSimCount.toLocaleString()}
+                    </span>
+                    <span className="block text-sm font-semibold text-slate-700 mt-2">International SIM calls</span>
+                    <p className="text-xs text-slate-500 mt-1">Outgoing to non-Indian numbers; excludes WhatsApp.</p>
+                  </div>
+
                   {/* Average Call Duration */}
                   <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
                     <span className="block text-4xl font-black text-slate-900 tracking-tight leading-none">
@@ -1659,6 +1687,7 @@ export default function RecorderHubDashboard() {
                     {renderDashSortHeader('answered', 'Answered')}
                     {renderDashSortHeader('unanswered', 'Unanswered')}
                     {renderDashSortHeader('whatsapp', 'WhatsApp Calls')}
+                    {renderDashSortHeader('internationalSim', 'International SIM Calls')}
                     {renderDashSortHeader('duration', 'Duration')}
                     {renderDashSortHeader('uniqueCalls', 'Unique Calls')}
                     {renderDashSortHeader('uniqueAnswered', 'Answered Calls', 'pr-6')}
@@ -1667,7 +1696,7 @@ export default function RecorderHubDashboard() {
                 <tbody className="divide-y divide-slate-100 font-medium">
                   {userActivityRows.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-12 text-center text-slate-500 font-medium">
+                      <td colSpan={9} className="p-12 text-center text-slate-500 font-medium">
                         {loading ? (
                           <div className="flex items-center justify-center space-x-2">
                             <RefreshCw className="w-4 h-4 animate-spin text-rose-500" />
@@ -1686,6 +1715,7 @@ export default function RecorderHubDashboard() {
                         <td className="p-4 text-center text-slate-800 font-medium">{user.answered}</td>
                         <td className="p-4 text-center text-slate-800 font-medium">{user.unanswered}</td>
                         <td className="p-4 text-center text-emerald-600 font-semibold">{user.whatsapp}</td>
+                        <td className="p-4 text-center text-sky-700 font-semibold">{user.internationalSim}</td>
                         <td className="p-4 text-center font-mono text-slate-800">{user.durationStr}</td>
                         <td className="p-4 text-center text-slate-800 font-medium">{user.uniqueCalls}</td>
                         <td className="p-4 text-center text-slate-800 font-medium pr-6">{user.uniqueAnswered}</td>

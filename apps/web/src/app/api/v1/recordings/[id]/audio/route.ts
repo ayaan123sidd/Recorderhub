@@ -75,22 +75,26 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
         const candidateKeys: string[] = [];
         if (s3KeyTarget) candidateKeys.push(s3KeyTarget);
         if (agentPrefix1) {
+          candidateKeys.push(`recordings/${agentPrefix1}/${recordingId}.webm`);
           candidateKeys.push(`recordings/${agentPrefix1}/${recordingId}.mp3`);
           candidateKeys.push(`recordings/${agentPrefix1}/${recordingId}.m4a`);
           candidateKeys.push(`recordings/${agentPrefix1}/${recordingId}.wav`);
           candidateKeys.push(`recordings/${agentPrefix1}/${recordingId}`);
         }
         if (agentPrefix2 && agentPrefix2 !== agentPrefix1) {
+          candidateKeys.push(`recordings/${agentPrefix2}/${recordingId}.webm`);
           candidateKeys.push(`recordings/${agentPrefix2}/${recordingId}.mp3`);
           candidateKeys.push(`recordings/${agentPrefix2}/${recordingId}.m4a`);
           candidateKeys.push(`recordings/${agentPrefix2}/${recordingId}.wav`);
           candidateKeys.push(`recordings/${agentPrefix2}/${recordingId}`);
         }
+        candidateKeys.push(`recordings/${recordingId}.webm`);
         candidateKeys.push(`recordings/${recordingId}.mp3`);
         candidateKeys.push(`recordings/${recordingId}.m4a`);
         candidateKeys.push(`recordings/${recordingId}.wav`);
         candidateKeys.push(`recordings/${recordingId}.3gp`);
         candidateKeys.push(`recordings/${recordingId}`);
+        candidateKeys.push(`${recordingId}.webm`);
         candidateKeys.push(`${recordingId}.mp3`);
         candidateKeys.push(`${recordingId}.m4a`);
 
@@ -106,6 +110,29 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           }
         }
 
+        // Intelligent prefix fallback: If direct candidate keys missed, search counselor folder by phone digits
+        if (!resolvedS3Key && (agentPrefix1 || agentPrefix2)) {
+          try {
+            const { ListObjectsV2Command } = await import('@aws-sdk/client-s3');
+            const searchPrefix = `recordings/${agentPrefix1 || agentPrefix2}/`;
+            const listRes = await s3Info.client.send(new ListObjectsV2Command({
+              Bucket: s3Info.bucket,
+              Prefix: searchPrefix,
+              MaxKeys: 50
+            }));
+            const digits = recordingId.replace(/\D/g, '');
+            const cleanDigits = digits.length >= 10 ? digits.slice(-10) : '';
+            if (cleanDigits && listRes.Contents) {
+              const matchedObj = listRes.Contents.find(o => o.Key && o.Key.includes(cleanDigits));
+              if (matchedObj?.Key) {
+                resolvedS3Key = matchedObj.Key;
+              }
+            }
+          } catch {
+            // ignore listing fallback error
+          }
+        }
+
         if (resolvedS3Key) {
           const S3_CACHE_KEY = `s3:audio:${resolvedS3Key}`;
 
@@ -116,8 +143,8 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
           }
 
           const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
-          const ext = resolvedS3Key.endsWith('.mp3') ? 'mp3' : resolvedS3Key.endsWith('.wav') ? 'wav' : 'm4a';
-          const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : 'audio/mp4';
+          const ext = resolvedS3Key.endsWith('.mp3') ? 'mp3' : resolvedS3Key.endsWith('.wav') ? 'wav' : resolvedS3Key.endsWith('.webm') ? 'webm' : 'm4a';
+          const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : ext === 'webm' ? 'audio/webm' : 'audio/mp4';
           const downloadFilename = `Recording_${recordingId}.${ext}`;
 
           const command = new GetObjectCommand({

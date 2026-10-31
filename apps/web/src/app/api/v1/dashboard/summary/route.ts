@@ -3,6 +3,7 @@ import { connectToDatabase, withDbRetry } from '@/lib/db';
 import { CallModel, UserModel, TeamModel, DeviceModel } from '@/lib/models';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { DASHBOARD_SUMMARY_CACHE_KEY, DASHBOARD_SUMMARY_CACHE_TTL } from '@/lib/cache-service';
+import { INTERNATIONAL_SIM_PHONE_PATTERN, WHATSAPP_DISPOSITION_PATTERN, WHATSAPP_CALL_KEY_PATTERN } from '@recordhub/shared';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -29,7 +30,7 @@ export async function GET(req: Request) {
     const team = searchParams.get('team');
     const channel = searchParams.get('channel');
 
-    const cacheKey = `summary:${dateRange}:${startDateParam || ''}:${endDateParam || ''}:${counselorEmail || ''}:${agentName || ''}:${team || ''}:${channel || ''}`;
+    const cacheKey = `summary:v2:${dateRange}:${startDateParam || ''}:${endDateParam || ''}:${counselorEmail || ''}:${agentName || ''}:${team || ''}:${channel || ''}`;
     const cached = await cacheGet<any>(cacheKey);
     if (cached) {
       const res = NextResponse.json(cached);
@@ -217,12 +218,48 @@ export async function GET(req: Request) {
       const [stats] = await (CallModel as any).aggregate([
         { $match: match },
         {
+          $set: {
+            _internationalSimCall: {
+              $and: [
+                { $in: [{ $toUpper: { $trim: { input: { $ifNull: ['$channel', 'CELLULAR'] } } } }, ['CELLULAR', 'SIM']] },
+                { $in: [{ $toUpper: { $trim: { input: { $ifNull: ['$direction', ''] } } } }, ['OUTGOING', 'OUTBOUND']] },
+                { $not: [{ $regexMatch: { input: { $ifNull: ['$disposition', ''] }, regex: WHATSAPP_DISPOSITION_PATTERN } }] },
+                { $not: [{ $regexMatch: { input: { $ifNull: ['$idempotencyKey', ''] }, regex: WHATSAPP_CALL_KEY_PATTERN } }] },
+                {
+                  $regexMatch: {
+                    // Keep non-separator characters so names and masked numbers cannot become valid digits.
+                    input: {
+                      $reduce: {
+                        input: {
+                          $regexFindAll: {
+                            input: {
+                              $convert: {
+                                input: { $cond: [{ $in: ['$phoneNumber', [null, '']] }, '$phoneNumberMasked', { $ifNull: ['$phoneNumber', '$phoneNumberMasked'] }] },
+                                to: 'string', onError: '', onNull: '',
+                              },
+                            },
+                            regex: /[^\s().-]/,
+                          },
+                        },
+                        initialValue: '',
+                        in: { $concat: ['$$value', '$$this.match'] },
+                      },
+                    },
+                    regex: INTERNATIONAL_SIM_PHONE_PATTERN,
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
           $facet: {
             kpis: [
               {
                 $group: {
                   _id: null,
                   totalCalls: { $sum: 1 },
+                  internationalSimCalls: { $sum: { $cond: ['$_internationalSimCall', 1, 0] } },
                   outboundCalls: { $sum: { $cond: [{ $in: [{ $toUpper: '$direction' }, ['OUTGOING', 'OUTBOUND']] }, 1, 0] } },
                   inboundCalls: { $sum: { $cond: [{ $in: [{ $toUpper: '$direction' }, ['INCOMING', 'INBOUND']] }, 1, 0] } },
                   answeredCalls: { $sum: { $cond: [{ $eq: [{ $toUpper: '$status' }, 'ANSWERED'] }, 1, 0] } },
@@ -267,6 +304,7 @@ export async function GET(req: Request) {
                   counselorEmail: { $first: '$counselorEmail' },
                   team: { $first: '$team' },
                   totalCalls: { $sum: 1 },
+                  internationalSimCalls: { $sum: { $cond: ['$_internationalSimCall', 1, 0] } },
                   answeredCalls: { $sum: { $cond: [{ $eq: [{ $toUpper: '$status' }, 'ANSWERED'] }, 1, 0] } },
                   unansweredCalls: { $sum: { $cond: [{ $ne: [{ $toUpper: '$status' }, 'ANSWERED'] }, 1, 0] } },
                   whatsappCalls: {
@@ -308,6 +346,7 @@ export async function GET(req: Request) {
 
       const kpi = stats?.kpis?.[0] || {
         totalCalls: 0,
+        internationalSimCalls: 0,
         outboundCalls: 0,
         inboundCalls: 0,
         answeredCalls: 0,

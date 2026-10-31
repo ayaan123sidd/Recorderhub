@@ -344,18 +344,38 @@ class WhatsAppCallNotificationListener : NotificationListenerService() {
 
         fun triggerRebind(context: Context) {
             val now = System.currentTimeMillis()
-            if (now - lastRebindAttemptMs < 10_000L) {
+            if (now - lastRebindAttemptMs < 5_000L) {
                 return
             }
             lastRebindAttemptMs = now
             try {
                 val componentName = ComponentName(context, WhatsAppCallNotificationListener::class.java)
+
+                // 1. Official Android N+ requestRebind
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    requestRebind(componentName)
-                    AppLogManager.log("INFO", "WhatsAppListener", "Triggered safe notification listener requestRebind.")
+                    try {
+                        requestRebind(componentName)
+                        AppLogManager.log("INFO", "WhatsAppListener", "Triggered safe notification listener requestRebind.")
+                    } catch (e: Exception) {
+                        Log.w("WhatsAppListener", "requestRebind notice: ${e.message}")
+                    }
                 }
+
+                // 2. Component toggle technique (Forces Android OS NotificationManagerService to immediately reconnect the listener)
+                val pm = context.packageManager
+                pm.setComponentEnabledSetting(
+                    componentName,
+                    android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    android.content.pm.PackageManager.DONT_KILL_APP
+                )
+                pm.setComponentEnabledSetting(
+                    componentName,
+                    android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    android.content.pm.PackageManager.DONT_KILL_APP
+                )
+                AppLogManager.log("INFO", "WhatsAppListener", "Notification listener component toggle rebind executed successfully.")
             } catch (e: Exception) {
-                AppLogManager.log("WARN", "WhatsAppListener", "Error triggering requestRebind: ${e.message}")
+                AppLogManager.log("WARN", "WhatsAppListener", "Error triggering robust rebind: ${e.message}")
             }
         }
     }

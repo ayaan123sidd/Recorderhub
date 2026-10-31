@@ -106,7 +106,7 @@ export function AudioPlayerProvider({ children }: { children: React.ReactNode })
       setCurrentTime(audio.currentTime);
     };
     const onLoadedMetadata = () => {
-      if (!isNaN(audio.duration) && audio.duration > 0) {
+      if (!isNaN(audio.duration) && Number.isFinite(audio.duration) && audio.duration > 0) {
         setDuration(audio.duration);
       }
       setIsLoading(false);

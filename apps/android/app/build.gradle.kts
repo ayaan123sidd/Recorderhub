@@ -12,8 +12,8 @@ android {
         applicationId = "com.academically.recordhub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 109
-        versionName = "1.0.9-prod"
+        versionCode = 112
+        versionName = "1.1.2-prod"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -62,9 +62,7 @@ android {
     }
 }
 
-kotlin {
-    jvmToolchain(17)
-}
+
 
 dependencies {
     // Android Core & Jetpack Compose

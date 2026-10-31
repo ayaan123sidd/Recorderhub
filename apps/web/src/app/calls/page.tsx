@@ -98,7 +98,8 @@ function AudioCell({ call, idx, canListen = true }: { call: any; idx: number; ca
   const { currentCall, isPlaying, playCall, duration: activePlayerDuration } = useAudioPlayer();
 
   const isAnswered = (call.status || 'ANSWERED').toUpperCase() === 'ANSWERED';
-  const hasRecording = call.audioUrl || call.s3Key || call.recordingStatus === 'COMPLETED' || call.recordingStatus === 'PENDING_UPLOAD';
+  const isPendingUpload = call.recordingStatus === 'PENDING_UPLOAD';
+  const isCompletedRec = call.recordingStatus === 'COMPLETED' || (Boolean(call.audioUrl) && !isPendingUpload && call.recordingStatus !== 'NONE');
 
   if (!canListen) {
     return (
@@ -109,21 +110,26 @@ function AudioCell({ call, idx, canListen = true }: { call: any; idx: number; ca
     );
   }
 
-  if (!isAnswered || call.recordingStatus === 'NONE' || (!hasRecording && !call.audioUrl)) {
+  if (isPendingUpload) {
+    const isRecent = call.startTime ? (Date.now() - new Date(call.startTime).getTime()) < 15 * 60 * 1000 : false;
+    if (isRecent) {
+      return (
+        <span className="inline-flex items-center space-x-1 text-amber-600 font-medium text-[11px] bg-amber-50 px-2 py-0.5 rounded border border-amber-200" title="Audio recording is syncing to AWS S3...">
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping inline-block mr-0.5" />
+          <span>Syncing...</span>
+        </span>
+      );
+    }
+    return <span className="text-slate-400 font-medium text-[11px]">No Recording</span>;
+  }
+
+  if (!isAnswered || call.recordingStatus === 'NONE' || !isCompletedRec) {
     return <span className="text-slate-400 font-medium text-[11px]">No Recording</span>;
   }
 
   const audioSrc = call.audioUrl || (call.s3Key ? `/api/v1/recordings/stream?key=${encodeURIComponent(call.s3Key)}` : null);
 
   if (!audioSrc) {
-    if (call.recordingStatus === 'PENDING_UPLOAD') {
-      return (
-        <span className="inline-flex items-center space-x-1 text-amber-600 font-medium text-[11px] bg-amber-50 px-2 py-0.5 rounded border border-amber-200" title="Audio recording is syncing to AWS S3...">
-          <span>⏳</span>
-          <span>Syncing...</span>
-        </span>
-      );
-    }
     return <span className="text-slate-400 font-medium text-[11px]">No Recording</span>;
   }
 
@@ -138,20 +144,24 @@ function AudioCell({ call, idx, canListen = true }: { call: any; idx: number; ca
 
   // Track actual audio file duration from active player or call record
   const [actualDuration, setActualDuration] = useState<number | null>(() => {
-    if (call.recordingDuration && call.recordingDuration > 0) return call.recordingDuration;
-    if (call.audioDuration && call.audioDuration > 0) return call.audioDuration;
+    if (typeof call.recordingDuration === 'number' && Number.isFinite(call.recordingDuration) && call.recordingDuration > 0) return call.recordingDuration;
+    if (typeof call.audioDuration === 'number' && Number.isFinite(call.audioDuration) && call.audioDuration > 0) return call.audioDuration;
     if (audioSrc && audioDurationCache.has(audioSrc)) {
-      return audioDurationCache.get(audioSrc)!;
+      const cached = audioDurationCache.get(audioSrc)!;
+      if (Number.isFinite(cached) && cached > 0) return cached;
     }
-    return call.durationSeconds || null;
+    const dur = Number(call.durationSeconds);
+    return Number.isFinite(dur) && dur > 0 ? dur : null;
   });
 
   // When active player is playing this call and reports duration, update cache and state
   useEffect(() => {
-    if (isThisCallActive && activePlayerDuration > 0 && audioSrc) {
+    if (isThisCallActive && Number.isFinite(activePlayerDuration) && activePlayerDuration > 0 && audioSrc) {
       const rounded = Math.round(activePlayerDuration);
-      audioDurationCache.set(audioSrc, rounded);
-      setActualDuration(rounded);
+      if (Number.isFinite(rounded) && rounded > 0) {
+        audioDurationCache.set(audioSrc, rounded);
+        setActualDuration(rounded);
+      }
     }
   }, [isThisCallActive, activePlayerDuration, audioSrc]);
 
@@ -170,13 +180,23 @@ function AudioCell({ call, idx, canListen = true }: { call: any; idx: number; ca
     hour12: true
   });
 
-  const durationSec = actualDuration ?? (isThisCallActive && activePlayerDuration > 0 ? activePlayerDuration : (call.recordingDuration || call.audioDuration || call.durationSeconds || 0));
+  const fallbackDur = (Number.isFinite(call.recordingDuration) && call.recordingDuration > 0) ? call.recordingDuration
+    : (Number.isFinite(call.audioDuration) && call.audioDuration > 0) ? call.audioDuration
+    : (Number.isFinite(call.durationSeconds) && call.durationSeconds > 0) ? call.durationSeconds : 0;
+
+  const playerDur = (isThisCallActive && Number.isFinite(activePlayerDuration) && activePlayerDuration > 0) ? activePlayerDuration : null;
+  const durationSec = actualDuration ?? playerDur ?? fallbackDur;
 
   const formatAudioDuration = (sec: number) => {
+    if (!Number.isFinite(sec) || sec <= 0) {
+      sec = fallbackDur;
+    }
     const totalSec = Math.round(sec || 0);
-    if (totalSec <= 0) return 'Play';
+    if (!Number.isFinite(totalSec) || totalSec <= 0) return 'Play';
     const mins = Math.floor(totalSec / 60);
     const remainingSecs = totalSec % 60;
+
+    if (!Number.isFinite(mins) || !Number.isFinite(remainingSecs)) return 'Play';
 
     if (mins === 0) {
       return `${remainingSecs}s`;
@@ -704,7 +724,7 @@ function SalestrailCallsInner() {
       if (typeof document !== 'undefined' && !document.hidden && document.visibilityState === 'visible') {
         fetchCalls();
       }
-    }, 60000);
+    }, 5000); // 5s live polling for real-time WhatsApp Web call status
 
     const handleGlobalPlay = (e: Event) => {
       const target = e.target as HTMLAudioElement;
@@ -1262,11 +1282,22 @@ function SalestrailCallsInner() {
       const rows = exportCalls.map((c: any) => {
         const isAns = (c.status || 'ANSWERED').toUpperCase() === 'ANSWERED';
         const durSec = isAns ? Number(c.durationSeconds || 0) : 0;
+        const isWaWeb =
+          (c.channel || '').toUpperCase() === 'WHATSAPP_WEB' ||
+          (c.disposition || '').toLowerCase().includes('web') ||
+          (c.idempotencyKey || '').includes('WA_WEB') ||
+          (c.idempotencyKey || '').includes('WEB');
+        const isWa =
+          isWaWeb ||
+          (c.channel || '').toUpperCase() === 'WHATSAPP' ||
+          (c.disposition || '').toLowerCase().includes('whatsapp') ||
+          (c.idempotencyKey || '').startsWith('WA_');
+
         return [
           resolveCounselorName(c),
           c.phoneNumber || c.phoneNumberMasked || '',
           c.leadName || c.phoneNumber || '',
-          c.channel === 'WHATSAPP' ? 'WhatsApp' : 'SIM',
+          isWaWeb ? 'WhatsApp Web' : (isWa ? 'WhatsApp' : 'SIM'),
           c.startTime ? new Date(c.startTime).toLocaleString() : '',
           c.direction || 'Outbound',
           isAns ? 'Answered' : 'Unanswered',
@@ -1641,7 +1672,14 @@ function SalestrailCallsInner() {
                   </tr>
                 ) : (
                   paginatedCalls.map((call, idx) => {
+                    const isWaWeb =
+                      (call.channel || '').toUpperCase() === 'WHATSAPP_WEB' ||
+                      (call.disposition || '').toLowerCase().includes('web') ||
+                      (call.idempotencyKey || '').includes('WA_WEB') ||
+                      (call.idempotencyKey || '').includes('WEB');
+
                     const isWhatsApp =
+                      isWaWeb ||
                       (call.channel || '').toUpperCase() === 'WHATSAPP' ||
                       (call.disposition || '').toLowerCase().includes('whatsapp') ||
                       (call.idempotencyKey || '').startsWith('WA_');
@@ -1683,17 +1721,35 @@ function SalestrailCallsInner() {
                       hour12: false
                     }) : '08/08/2026 23:15:56';
 
-                    const isAnswered = (call.status || 'ANSWERED').toUpperCase() === 'ANSWERED';
-                    const effectiveDuration = isAnswered ? Number(call.durationSeconds || 0) : 0;
+                    const isRecentLive = call.startTime ? (Date.now() - new Date(call.startTime).getTime()) < 15 * 60 * 1000 : false;
+                    const hasRecordedDuration = Number(call.durationSeconds || 0) > 0;
+                    const isOngoing = ((call.status || '').toUpperCase() === 'IN_PROGRESS' || (call.status || '').toUpperCase() === 'CALLING')
+                      && !call.endTime
+                      && !hasRecordedDuration
+                      && !call.audioUrl
+                      && call.recordingStatus !== 'COMPLETED'
+                      && isRecentLive;
+
+                    const isAnswered = !isOngoing && ((call.status || 'ANSWERED').toUpperCase() === 'ANSWERED' || Boolean(call.audioUrl) || call.recordingStatus === 'COMPLETED' || hasRecordedDuration);
+
+                    let calculatedDuration = Number(call.durationSeconds || 0);
+                    if (isOngoing && call.startTime) {
+                      calculatedDuration = Math.max(0, Math.floor((Date.now() - new Date(call.startTime).getTime()) / 1000));
+                    } else if (calculatedDuration === 0 && call.startTime && call.endTime) {
+                      const diffSec = Math.round((new Date(call.endTime).getTime() - new Date(call.startTime).getTime()) / 1000);
+                      if (diffSec > 0) calculatedDuration = diffSec;
+                    }
+
+                    const effectiveDuration = (isAnswered || isOngoing) ? calculatedDuration : 0;
                     const durationMins = effectiveDuration > 0 ? Math.floor(effectiveDuration / 60) : 0;
                     const durationSecs = effectiveDuration > 0 ? effectiveDuration % 60 : 0;
-                    const durationStr = isAnswered && effectiveDuration > 0
+                    const durationStr = (isAnswered || isOngoing) && effectiveDuration > 0
                       ? (durationMins > 0 ? (durationSecs > 0 ? `${durationMins}m ${durationSecs}s` : `${durationMins}m`) : `${durationSecs}s`)
                       : '0s';
 
                     const isOutbound = (call.direction || 'OUTGOING').toUpperCase() === 'OUTGOING' || (call.direction || '').toUpperCase() === 'OUTBOUND';
 
-                    const isMismatchRow = isCallDurationMismatch(call);
+                    const isMismatchRow = !isOngoing && isCallDurationMismatch(call);
 
                     const isThisRowActive = Boolean(currentCall && (
                       (currentCall._id && currentCall._id === call._id) ||
@@ -1706,9 +1762,11 @@ function SalestrailCallsInner() {
                       <tr 
                         key={call.id || call._id || idx} 
                         className={`transition-colors ${
-                          isThisRowActive 
-                            ? 'bg-rose-50/70 border-l-4 border-rose-500' 
-                            : 'hover:bg-slate-50'
+                          isOngoing
+                            ? 'bg-amber-50/60 border-l-4 border-amber-500'
+                            : isThisRowActive 
+                              ? 'bg-rose-50/70 border-l-4 border-rose-500' 
+                              : 'hover:bg-slate-50'
                         }`}
                       >
                         {/* User */}
@@ -1725,9 +1783,14 @@ function SalestrailCallsInner() {
                         </td>
                         {/* Type */}
                         <td className="p-4 text-center whitespace-nowrap">
-                          <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-semibold ${isWhatsApp ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-800'
-                            }`}>
-                            {isWhatsApp ? 'WhatsApp' : 'SIM'}
+                          <span className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-semibold ${
+                            isWaWeb
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+                              : isWhatsApp 
+                                ? 'bg-teal-50 text-teal-700 border border-teal-200' 
+                                : 'bg-slate-100 text-slate-800'
+                          }`}>
+                            {isWaWeb ? 'WhatsApp Web' : (isWhatsApp ? 'WhatsApp' : 'SIM')}
                           </span>
                         </td>
                         {/* Call Time */}
@@ -1739,8 +1802,17 @@ function SalestrailCallsInner() {
                           {isOutbound ? 'Outbound' : 'Inbound'}
                         </td>
                         {/* Status */}
-                        <td className="p-4 text-center font-medium text-slate-800 whitespace-nowrap">
-                          {isAnswered ? 'Answered' : 'Unanswered'}
+                        <td className="p-4 text-center font-medium whitespace-nowrap">
+                          {isOngoing ? (
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 animate-ping inline-block" />
+                              <span>Live</span>
+                            </span>
+                          ) : isAnswered ? (
+                            <span className="text-slate-800">Answered</span>
+                          ) : (
+                            <span className="text-slate-500">Unanswered</span>
+                          )}
                         </td>
                         {/* Duration */}
                         <td className="p-4 text-center font-semibold text-slate-900 whitespace-nowrap">
@@ -2083,6 +2155,7 @@ function SalestrailCallsInner() {
                     >
                       <option value="CELLULAR">SIM (Cellular)</option>
                       <option value="WHATSAPP">WhatsApp</option>
+                      <option value="WHATSAPP_WEB">WhatsApp Web</option>
                     </select>
                   </div>
 
@@ -2289,6 +2362,7 @@ function SalestrailCallsInner() {
                     >
                       <option value="CELLULAR">SIM (Cellular)</option>
                       <option value="WHATSAPP">WhatsApp</option>
+                      <option value="WHATSAPP_WEB">WhatsApp Web</option>
                     </select>
                   </div>
 

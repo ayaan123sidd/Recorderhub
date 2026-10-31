@@ -79,6 +79,7 @@ export async function POST(req: Request) {
     const recordingId = `${counselorFolder}_${cleanPhone}_${dateStr}_${uniqueSuffix}`;
     const ext = mimeType?.includes('mpeg') || mimeType?.includes('mp3') ? 'mp3'
               : mimeType?.includes('wav') ? 'wav'
+              : mimeType?.includes('webm') ? 'webm'
               : mimeType?.includes('3gpp') || mimeType?.includes('3gp') ? '3gp'
               : mimeType?.includes('amr') ? 'amr' : 'm4a';
 
@@ -98,7 +99,7 @@ export async function POST(req: Request) {
         const command = new PutObjectCommand({
           Bucket: s3Info.bucket,
           Key: s3Key,
-          ContentType: mimeType || (ext === 'wav' ? 'audio/wav' : ext === 'mp3' ? 'audio/mpeg' : 'audio/m4a'),
+          ContentType: mimeType || (ext === 'wav' ? 'audio/wav' : ext === 'mp3' ? 'audio/mpeg' : ext === 'webm' ? 'audio/webm' : 'audio/m4a'),
         });
 
         // Generate 15-minute AWS S3 presigned URL for direct APK upload

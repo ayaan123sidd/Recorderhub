@@ -3,15 +3,14 @@ package com.academically.recordhub
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.os.Build
-import androidx.work.Configuration
-import androidx.work.WorkManager
-
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
+import androidx.work.Configuration
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.academically.recordhub.service.CallObserverService
 import com.academically.recordhub.worker.CallSyncWorker
 import java.util.concurrent.TimeUnit
@@ -50,6 +49,15 @@ class RecordHubApp : Application(), Configuration.Provider {
                     ExistingPeriodicWorkPolicy.UPDATE,
                     syncWorkRequest
                 )
+
+                // 3. Ensure WhatsApp Call Notification Listener is bound and active
+                try {
+                    if (com.academically.recordhub.service.WhatsAppCallNotificationListener.isNotificationListenerEnabled(this)) {
+                        com.academically.recordhub.service.WhatsAppCallNotificationListener.triggerRebind(this)
+                    }
+                } catch (e: Exception) {
+                    Log.w("RecordHubApp", "WhatsApp listener rebind on app startup: ${e.message}")
+                }
             }
         } catch (e: Exception) {
             Log.e("RecordHubApp", "Error initializing background monitoring in Application: ${e.message}")

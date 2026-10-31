@@ -21,6 +21,7 @@ import com.academically.recordhub.utils.CallLogScanner
 import com.academically.recordhub.worker.CallSyncWorker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -184,22 +185,18 @@ class CallObserverService : Service() {
                     startForeground(
                         NOTIFICATION_ID,
                         notification,
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-                                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                     )
                 } catch (e1: Exception) {
                     try {
                         startForeground(
                             NOTIFICATION_ID,
                             notification,
-                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                         )
                     } catch (e2: Exception) {
-                        startForeground(
-                            NOTIFICATION_ID,
-                            notification,
-                            android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                        )
+                        startForeground(NOTIFICATION_ID, notification)
                     }
                 }
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -296,6 +293,9 @@ class CallObserverService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        try {
+            serviceScope.cancel()
+        } catch (_: Exception) {}
         telephonyManager?.listen(callStateListener, PhoneStateListener.LISTEN_NONE)
         callLogContentObserver?.let {
             try {

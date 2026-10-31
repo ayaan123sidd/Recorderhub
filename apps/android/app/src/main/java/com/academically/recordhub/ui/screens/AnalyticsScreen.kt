@@ -94,8 +94,8 @@ fun AnalyticsScreen(
         callEvents.filter { call ->
             val inTime = call.startTime in startTimestamp..endTimestamp
             val inSim = when (selectedSimFilter) {
-                "SIM1" -> call.simSlot == 0
-                "SIM2" -> call.simSlot == 1
+                "SIM1" -> !call.isWhatsAppCall() && call.simSlot == 0
+                "SIM2" -> !call.isWhatsAppCall() && call.simSlot == 1
                 else -> true
             }
             inTime && inSim
@@ -103,6 +103,9 @@ fun AnalyticsScreen(
     }
 
     val totalCalls = rangeCalls.size
+    val whatsAppCalls = rangeCalls.count { it.isWhatsAppCall() }
+    val sim1Count = rangeCalls.count { !it.isWhatsAppCall() && it.simSlot == 0 }
+    val sim2Count = rangeCalls.count { !it.isWhatsAppCall() && it.simSlot == 1 }
     val incomingCalls = rangeCalls.count { it.direction.equals("INCOMING", ignoreCase = true) }
     val outgoingCalls = rangeCalls.count { it.direction.equals("OUTGOING", ignoreCase = true) }
     val missedCalls = rangeCalls.count { it.status.equals("MISSED", ignoreCase = true) || it.status.equals("REJECTED", ignoreCase = true) }
@@ -262,6 +265,13 @@ fun AnalyticsScreen(
                         AnalyticsCard(title = "Missed", value = "$missedCalls", color = Color(0xFFEF4444), modifier = Modifier.weight(1f))
                     }
 
+                    AnalyticsCard(
+                        title = "WhatsApp Calls",
+                        value = "$whatsAppCalls",
+                        color = WhatsAppColor,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
                     Card(
                         shape = RoundedCornerShape(14.dp),
                         colors = CardDefaults.cardColors(containerColor = CardBg),
@@ -312,13 +322,11 @@ fun AnalyticsScreen(
                                 .padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Text("SIM Breakdown", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = TextPrimary)
-
-                            val sim1Count = rangeCalls.count { it.simSlot == 0 }
-                            val sim2Count = rangeCalls.count { it.simSlot == 1 }
+                            Text("Call Channels", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = TextPrimary)
 
                             ChannelProgressRow(label = "SIM Slot 1", count = sim1Count, total = totalCalls, color = Color(0xFF2563EB))
                             ChannelProgressRow(label = "SIM Slot 2", count = sim2Count, total = totalCalls, color = AmberGold)
+                            ChannelProgressRow(label = "WhatsApp", count = whatsAppCalls, total = totalCalls, color = WhatsAppColor)
                         }
                     }
                 }
@@ -380,6 +388,11 @@ fun AnalyticsScreen(
         }
     }
 }
+
+private fun CallEventEntity.isWhatsAppCall(): Boolean =
+    disposition.contains("WhatsApp", ignoreCase = true) ||
+        idempotencyKey.startsWith("WA_", ignoreCase = true) ||
+        idempotencyKey.startsWith("WA_LOG-", ignoreCase = true)
 
 @Composable
 private fun AnalyticsCard(title: String, value: String, color: Color, modifier: Modifier = Modifier) {

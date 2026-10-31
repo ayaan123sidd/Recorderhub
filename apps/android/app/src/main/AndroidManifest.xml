@@ -34,7 +34,7 @@
     <application
         android:name=".RecordHubApp"
         android:allowBackup="false"
-        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:requestLegacyExternalStorage="true"
         android:icon="@android:drawable/ic_menu_call"
         android:label="RecordHub"
@@ -80,7 +80,7 @@
             android:name=".service.CallObserverService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|specialUse">
+            android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Sales call telemetry observation and audio recording upload sync" />

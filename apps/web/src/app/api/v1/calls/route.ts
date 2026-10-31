@@ -232,14 +232,17 @@ export async function GET(req: Request) {
       andConditions.push({
         $or: [
           { channel: 'WHATSAPP' },
+          { channel: 'WHATSAPP_WEB' },
           { disposition: { $regex: /whatsapp/i } },
+          { disposition: { $regex: /web/i } },
           { idempotencyKey: { $regex: /^WA_/i } },
         ],
       });
     } else if (anomaly === 'sim') {
       andConditions.push({
-        channel: { $ne: 'WHATSAPP' },
-        disposition: { $not: /whatsapp/i },
+        channel: { $nin: ['WHATSAPP', 'WHATSAPP_WEB'] },
+        disposition: { $not: /(whatsapp|web)/i },
+        idempotencyKey: { $not: /^WA_/i },
       });
     } else if (anomaly === 'unanswered') {
       andConditions.push({ status: { $ne: 'ANSWERED' } });
@@ -393,7 +396,9 @@ export async function GET(req: Request) {
                         {
                           $or: [
                             { $eq: [{ $toUpper: '$channel' }, 'WHATSAPP'] },
+                            { $eq: [{ $toUpper: '$channel' }, 'WHATSAPP_WEB'] },
                             { $regexMatch: { input: { $ifNull: ['$disposition', ''] }, regex: /whatsapp/i } },
+                            { $regexMatch: { input: { $ifNull: ['$disposition', ''] }, regex: /web/i } },
                             { $regexMatch: { input: { $ifNull: ['$idempotencyKey', ''] }, regex: /^WA_/i } },
                           ],
                         },
@@ -408,7 +413,9 @@ export async function GET(req: Request) {
                         {
                           $and: [
                             { $ne: [{ $toUpper: '$channel' }, 'WHATSAPP'] },
+                            { $ne: [{ $toUpper: '$channel' }, 'WHATSAPP_WEB'] },
                             { $not: { $regexMatch: { input: { $ifNull: ['$disposition', ''] }, regex: /whatsapp/i } } },
+                            { $not: { $regexMatch: { input: { $ifNull: ['$disposition', ''] }, regex: /web/i } } },
                             { $not: { $regexMatch: { input: { $ifNull: ['$idempotencyKey', ''] }, regex: /^WA_/i } } },
                           ],
                         },

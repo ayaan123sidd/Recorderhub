@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Enforce HTTPS as the default for all external communication -->
+    <base-config cleartextTrafficPermitted="false" />
+
+    <!-- Permit cleartext traffic exclusively to the dedicated backend server IP and local debugging endpoints -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">13.233.193.42</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
+

@@ -1,3 +1,5 @@
+export * from './call-analytics';
+
 /**
  * Cleanses and normalizes phone numbers into E.164 standard format (+91...)
  */

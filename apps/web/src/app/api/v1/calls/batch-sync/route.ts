@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/db';
 import { CallModel, DeviceModel, UserModel } from '@/lib/models';
-import { updateCallsCacheWithNewBatch, formatPhoneNumber } from '@/lib/cache-service';
+import { updateCallsCacheWithNewBatch, formatPhoneNumber, patchCallInCache } from '@/lib/cache-service';
 import { getS3Client } from '@/lib/aws';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -70,9 +70,9 @@ export async function POST(req: Request) {
     const incomingKeys = callEvents.map((e: any) => e.idempotencyKey).filter(Boolean);
     const existingCalls = await (CallModel as any).find(
       { idempotencyKey: { $in: incomingKeys } },
-      { idempotencyKey: 1, _id: 1, agentName: 1, s3Key: 1, audioUrl: 1, recordingStatus: 1 }
+      { idempotencyKey: 1, _id: 1, agentName: 1, s3Key: 1, audioUrl: 1, recordingStatus: 1, status: 1, durationSeconds: 1, endTime: 1 }
     ).lean().exec();
-    const existingKeyMap = new Map(existingCalls.map((c: any) => [c.idempotencyKey, c]));
+    const existingKeyMap = new Map<string, any>(existingCalls.map((c: any) => [c.idempotencyKey, c]));
 
     const counselorEmails = Array.from(new Set(callEvents.map((e: any) => (e.counselorEmail || e.email || '').trim().toLowerCase()).filter(Boolean)));
     const emailRegexList = counselorEmails.map((em: string) => new RegExp(`^${em.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'));
@@ -179,20 +179,84 @@ export async function POST(req: Request) {
       };
 
       // Check 1: Exact idempotencyKey already in DB
-      const isWaExisting = (evt.channel || '').toUpperCase() === 'WHATSAPP' ||
+      const isWaWebEvt = (evt.channel || '').toUpperCase() === 'WHATSAPP_WEB' ||
+                         (evt.disposition || '').toLowerCase().includes('web') ||
+                         (evt.idempotencyKey || '').includes('WA_WEB') ||
+                         (evt.idempotencyKey || '').includes('WEB');
+
+      const isWaExisting = isWaWebEvt ||
+                           (evt.channel || '').toUpperCase() === 'WHATSAPP' ||
                            (evt.disposition || '').toLowerCase().includes('whatsapp') || 
                            (evt.idempotencyKey || '').startsWith('WA_');
 
       if (existingKeyMap.has(evt.idempotencyKey)) {
         duplicates.push(evt.idempotencyKey);
-        // If the mobile app requested an upload URL for this existing call, generate it only if not a non-recording WhatsApp call
-        if (evt.hasRecording && (!isWaExisting || (evt.idempotencyKey || '').startsWith('WA_'))) {
-          const existingDoc = existingKeyMap.get(evt.idempotencyKey);
+        const existingDoc = existingKeyMap.get(evt.idempotencyKey);
+        const updateFields: any = {};
+
+        const isExistingAnswered = (existingDoc?.status || '').toUpperCase() === 'ANSWERED';
+        const isExistingFinished = isExistingAnswered || Boolean(existingDoc?.endTime) || (Number(existingDoc?.durationSeconds || 0) > 0) || (existingDoc?.recordingStatus === 'COMPLETED');
+
+        // Never downgrade an already completed/answered call back to IN_PROGRESS
+        if (evt.status) {
+          if (!isExistingFinished || evt.status.toUpperCase() !== 'IN_PROGRESS') {
+            updateFields.status = evt.status;
+          }
+        }
+
+        if (typeof evt.durationSeconds === 'number' && evt.durationSeconds > 0) {
+          updateFields.durationSeconds = evt.durationSeconds;
+        }
+
+        if (evt.endTime) {
+          updateFields.endTime = new Date(evt.endTime);
+          // If endTime is provided, ensure status is marked ANSWERED or UNANSWERED, never IN_PROGRESS
+          const hasDur = (evt.durationSeconds && evt.durationSeconds > 0) || (existingDoc?.durationSeconds && existingDoc.durationSeconds > 0);
+          updateFields.status = hasDur ? 'ANSWERED' : 'UNANSWERED';
+        }
+
+        if (evt.phoneNumber && evt.phoneNumber !== 'WhatsApp Contact') {
+          updateFields.phoneNumber = evt.phoneNumber;
+          updateFields.phoneNumberMasked = evt.phoneNumber;
+        }
+
+        if (evt.leadName && evt.leadName !== 'WhatsApp Contact') {
+          updateFields.leadName = evt.leadName;
+        }
+
+        if (evt.direction) {
+          updateFields.direction = evt.direction;
+        }
+
+        if (evt.channel) {
+          updateFields.channel = evt.channel;
+        } else if (isWaWebEvt) {
+          updateFields.channel = 'WHATSAPP_WEB';
+        }
+
+        if (evt.disposition) {
+          updateFields.disposition = evt.disposition;
+        } else if (isWaWebEvt) {
+          updateFields.disposition = 'WhatsApp Web Call';
+        }
+
+        // If the call already has completed recording metadata attached, preserve it
+        if (evt.recordingStatus === 'COMPLETED' && evt.audioUrl) {
+          updateFields.recordingStatus = 'COMPLETED';
+          if (evt.s3Key) updateFields.s3Key = evt.s3Key;
+          if (evt.audioUrl) updateFields.audioUrl = evt.audioUrl;
+        } else if (evt.recordingStatus === 'NONE' || (!evt.hasRecording && !evt.audioUrl)) {
+          if (isWaWebEvt) {
+            updateFields.recordingStatus = 'NONE';
+            updateFields.audioUrl = null;
+            updateFields.s3Key = null;
+          }
+        } else if (evt.hasRecording && !isWaWebEvt && (!isWaExisting || ((evt.idempotencyKey || '').startsWith('WA_') && !(evt.idempotencyKey || '').includes('WEB')))) {
+          // If the mobile app requested an upload URL for this existing call, generate it only if not a WhatsApp Web call
           const uploadInfo = await generatePresignedUploadInfo(evt.idempotencyKey, evt.deviceId || 'ANDROID-DEVICE-PROD', evt.mimeType);
-          await (CallModel as any).updateOne(
-            { idempotencyKey: evt.idempotencyKey },
-            { $set: { recordingStatus: 'PENDING_UPLOAD', s3Key: uploadInfo.s3Key, audioUrl: uploadInfo.audioUrl } }
-          ).catch(() => {});
+          updateFields.recordingStatus = 'PENDING_UPLOAD';
+          updateFields.s3Key = uploadInfo.s3Key;
+          updateFields.audioUrl = uploadInfo.audioUrl;
           uploadUrls.push({
             idempotencyKey: evt.idempotencyKey,
             recordingId: uploadInfo.recordingId,
@@ -201,6 +265,14 @@ export async function POST(req: Request) {
             fallbackUploadUrl: uploadInfo.fallbackUploadUrl,
           });
         }
+
+        if (Object.keys(updateFields).length > 0) {
+          await (CallModel as any).updateOne(
+            { idempotencyKey: evt.idempotencyKey },
+            { $set: updateFields }
+          ).catch(() => {});
+          await patchCallInCache(evt.idempotencyKey, updateFields).catch(() => {});
+        }
         continue;
       }
 
@@ -208,20 +280,29 @@ export async function POST(req: Request) {
         const rawPhone = (evt.phoneNumber || '').trim();
         const cleanDigits = rawPhone.replace(/\D/g, '');
 
+        const isWaWeb = 
+          (evt.channel || '').toUpperCase() === 'WHATSAPP_WEB' ||
+          (evt.disposition || '').toLowerCase().includes('web') || 
+          (evt.idempotencyKey || '').includes('WA_WEB') ||
+          (evt.idempotencyKey || '').includes('WEB');
+
         const isWhatsApp = 
+          isWaWeb ||
           (evt.channel || '').toUpperCase() === 'WHATSAPP' ||
           (evt.disposition || '').toLowerCase().includes('whatsapp') || 
           (evt.idempotencyKey || '').startsWith('WA_');
 
         const formattedPhone = isWhatsApp ? rawPhone : (formatPhoneNumber(rawPhone) || rawPhone);
-        const channelType = isWhatsApp ? 'WHATSAPP' : (evt.channel || 'CELLULAR');
+        const channelType = evt.channel ? evt.channel : (isWaWeb ? 'WHATSAPP_WEB' : (isWhatsApp ? 'WHATSAPP' : 'CELLULAR'));
         const cleanKey = evt.idempotencyKey || `SYNC_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+        const isOngoing = (evt.status || '').toUpperCase() === 'IN_PROGRESS' || (evt.status || '').toUpperCase() === 'CALLING';
         const isAnswered = (evt.status || 'ANSWERED').toUpperCase() === 'ANSWERED';
-        const effectiveDuration = isAnswered ? (evt.durationSeconds || 0) : 0;
+        const effectiveDuration = (isAnswered || isOngoing) ? (evt.durationSeconds || 0) : 0;
 
         let uploadInfo = null;
-        if (evt.hasRecording && (!isWhatsApp || cleanKey.startsWith('WA_'))) {
+        const isPreUploaded = evt.recordingStatus === 'COMPLETED' && evt.audioUrl;
+        if (!isPreUploaded && evt.hasRecording && !isWaWeb && (!isWhatsApp || (cleanKey.startsWith('WA_') && !cleanKey.includes('WEB')))) {
           uploadInfo = await generatePresignedUploadInfo(cleanKey, evt.deviceId || 'ANDROID-DEVICE-PROD', evt.mimeType);
           uploadUrls.push({
             idempotencyKey: cleanKey,
@@ -241,18 +322,18 @@ export async function POST(req: Request) {
           direction: evt.direction || 'INCOMING',
           status: evt.status || 'ANSWERED',
           startTime: evtStartTime,
-          endTime: evt.endTime ? new Date(evt.endTime) : new Date(evtStartTime.getTime() + (effectiveDuration * 1000)),
+          endTime: evt.endTime ? new Date(evt.endTime) : (isOngoing ? null : new Date(evtStartTime.getTime() + (effectiveDuration * 1000))),
           durationSeconds: effectiveDuration,
           simSlot: evt.simSlot || 0,
           isPrivate: evt.isPrivate || false,
-          disposition: evt.disposition || (isWhatsApp ? 'WhatsApp Call' : 'Imported Phone Call'),
+          disposition: evt.disposition || (isWaWeb ? 'WhatsApp Web Call' : (isWhatsApp ? 'WhatsApp Call' : 'Imported Phone Call')),
           channel: channelType,
           agentName: resolvedAgentName,
           counselorEmail: email,
           leadName: evt.leadName || formattedPhone || 'Contact',
-          recordingStatus: uploadInfo ? 'PENDING_UPLOAD' : 'NONE',
-          s3Key: uploadInfo?.s3Key,
-          audioUrl: uploadInfo?.audioUrl,
+          recordingStatus: evt.recordingStatus || (uploadInfo ? 'PENDING_UPLOAD' : 'NONE'),
+          s3Key: evt.s3Key || uploadInfo?.s3Key || null,
+          audioUrl: evt.audioUrl || uploadInfo?.audioUrl || null,
         };
 
         const savedCall = await (CallModel as any).create(createdDoc);

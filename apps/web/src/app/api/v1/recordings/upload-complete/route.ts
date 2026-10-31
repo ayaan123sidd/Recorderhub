@@ -63,6 +63,8 @@ export async function POST(req: Request) {
             $set: {
               recordingStatus: 'COMPLETED',
               audioUrl: audioUrl,
+              status: 'ANSWERED',
+              ...(body.s3Key ? { s3Key: body.s3Key } : {})
             },
           },
           { sort: { createdAt: -1 }, new: true }
@@ -97,6 +99,7 @@ export async function POST(req: Request) {
                 $set: {
                   recordingStatus: 'COMPLETED',
                   audioUrl: audioUrl,
+                  status: 'ANSWERED',
                 },
               },
               { sort: { startTime: -1, createdAt: -1 }, new: true }

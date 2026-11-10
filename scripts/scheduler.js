@@ -1,12 +1,12 @@
 /**
  * Production Daily Report Scheduler for EC2 / Node.js
- * Automatically triggers the daily report email at a configured time (Default: 7:00 PM IST)
+ * Automatically triggers the daily report email twice daily:
+ * 1) 1:00 PM IST (Midday Report)
+ * 2) 9:00 PM IST (End of Day Report)
  */
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
-const https = require('https');
-//the comment
 
 // 1. Auto-load environment variables
 function loadEnv() {
@@ -35,12 +35,16 @@ loadEnv();
 
 const WEB_PORT = process.env.WEB_PORT || process.env.PORT || 3000;
 const CRON_SECRET = process.env.CRON_SECRET || '$@Chin9936';
-const TARGET_HOUR_IST = 21; // 21 = 9:00:00 PM IST (24h format)
-const TARGET_MINUTE_IST = 00; // 00 minutes
 
-function triggerDailyReport() {
+// Configured schedule slots in IST (Asia/Kolkata)
+const SCHEDULED_TIMES = [
+  { hour: 13, minute: 0, label: '1:00 PM IST (Midday Report)' },
+  { hour: 21, minute: 0, label: '9:00 PM IST (End of Day Report)' },
+];
+
+function triggerDailyReport(slotLabel = '') {
   const url = `http://127.0.0.1:${WEB_PORT}/api/v1/cron/daily-report?token=${encodeURIComponent(CRON_SECRET)}`;
-  console.log(`[${new Date().toISOString()}] ⏰ Triggering Daily HR Report via: ${url}`);
+  console.log(`[${new Date().toISOString()}] ⏰ Triggering Daily HR Report [${slotLabel}] via: ${url}`);
 
   http.get(url, (res) => {
     let body = '';
@@ -49,7 +53,7 @@ function triggerDailyReport() {
       try {
         const parsed = JSON.parse(body);
         if (parsed.success) {
-          console.log(`✅ [${new Date().toISOString()}] Daily HR Report sent successfully!`, parsed.summary);
+          console.log(`✅ [${new Date().toISOString()}] Daily HR Report [${slotLabel}] sent successfully!`, parsed.summary);
         } else {
           console.error(`❌ [${new Date().toISOString()}] Daily Report Error:`, parsed.error);
         }
@@ -62,13 +66,16 @@ function triggerDailyReport() {
   });
 }
 
-// Check every 30 seconds if current IST time matches target time
-let lastTriggeredDate = '';
+// Track last triggered slot so it only fires once per scheduled time
+let lastTriggeredSlot = '';
 
 function startScheduler() {
   console.log('================================================================');
   console.log('🚀 RecordHub EC2 Daily Report Scheduler Started');
-  console.log(`⏰ Scheduled Time: ${TARGET_HOUR_IST}:${TARGET_MINUTE_IST.toString().padStart(2, '0')} PM IST every day`);
+  console.log('⏰ Scheduled Times (IST):');
+  SCHEDULED_TIMES.forEach((slot, index) => {
+    console.log(`   ${index + 1}) ${slot.label} (at ${slot.hour.toString().padStart(2, '0')}:${slot.minute.toString().padStart(2, '0')} IST)`);
+  });
   console.log(`🔌 Target API: http://127.0.0.1:${WEB_PORT}/api/v1/cron/daily-report`);
   console.log('================================================================');
 
@@ -80,10 +87,14 @@ function startScheduler() {
 
     const [hour, minute] = istTimeStr.split(':').map(Number);
 
-    // If it's target time (e.g. 19:00 IST) and hasn't run today yet
-    if (hour === TARGET_HOUR_IST && minute === TARGET_MINUTE_IST && lastTriggeredDate !== istDateStr) {
-      lastTriggeredDate = istDateStr;
-      triggerDailyReport();
+    for (const slot of SCHEDULED_TIMES) {
+      if (hour === slot.hour && minute === slot.minute) {
+        const slotKey = `${istDateStr}_${slot.hour}:${slot.minute}`;
+        if (lastTriggeredSlot !== slotKey) {
+          lastTriggeredSlot = slotKey;
+          triggerDailyReport(slot.label);
+        }
+      }
     }
   }, 30000); // check every 30s
 }

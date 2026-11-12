@@ -1,6 +1,7 @@
 import { cacheGet, cacheSet, cacheDel } from './cache';
 import { connectToDatabase, withDbRetry } from './db';
 import { CallModel, DeviceModel, UserModel, TeamModel } from './models';
+import { buildCallSearchOrClauses } from './call-search';
 
 export const CALLS_CACHE_KEY = 'cache:calls:latest';
 export const CALLS_CACHE_TTL = 86400; // 24 hours cache TTL (kept fresh via incremental sync)
@@ -365,13 +366,8 @@ export async function queryCallsFromDb(filters: {
         }
       }
 
-      if (filters.search) {
-        const term = filters.search.trim();
-        query.$or = [
-          { phoneNumber: { $regex: term, $options: 'i' } },
-          { phoneNumberMasked: { $regex: term, $options: 'i' } },
-          { leadName: { $regex: term, $options: 'i' } },
-        ];
+      if (filters.search && filters.search.trim()) {
+        query.$or = buildCallSearchOrClauses(filters.search, ['leadName'], ['phoneNumber', 'phoneNumberMasked']);
       }
 
       const limit = Math.min(filters.limit || 1000, 5000);

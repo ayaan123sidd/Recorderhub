@@ -15,6 +15,7 @@ import { CallModel, DeviceModel, TeamModel, UserModel } from '@/lib/models';
 import { getS3Client } from '@/lib/aws';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { buildDateMongoFilter } from '@/lib/date-range';
+import { buildCallSearchOrClauses } from '@/lib/call-search';
 import mongoose from 'mongoose';
 
 export const dynamic = 'force-dynamic';
@@ -235,15 +236,8 @@ export async function GET(req: Request) {
 
     // Search Query (Phone, Contact Name, Counselor Name)
     if (search && search.trim()) {
-      const term = search.trim();
-      const searchRegex = { $regex: term, $options: 'i' };
       andConditions.push({
-        $or: [
-          { phoneNumber: searchRegex },
-          { phoneNumberMasked: searchRegex },
-          { leadName: searchRegex },
-          { agentName: searchRegex },
-        ],
+        $or: buildCallSearchOrClauses(search, ['leadName', 'agentName'], ['phoneNumber', 'phoneNumberMasked']),
       });
     }
 

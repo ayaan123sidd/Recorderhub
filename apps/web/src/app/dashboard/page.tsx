@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { isInternationalSimCall } from '@recordhub/shared';
+import { CALL_DATE_RANGE_OPTIONS, formatDateRangeSpan, isDateInRange } from '@/lib/date-range';
 
 export default function RecorderHubDashboard() {
   const { role: userRole, email: userEmail, isSuperAdmin, isAdmin, isManager, isTeamLead: rawIsTeamLead, isCounselor: rawIsCounselor } = useUserRole();
@@ -90,9 +91,13 @@ export default function RecorderHubDashboard() {
   const isFetchingCallsRef = React.useRef(false);
   const isFetchingCounselorsRef = React.useRef(false);
   const isFetchingTeamsRef = React.useRef(false);
+  const summaryAbortRef = React.useRef<AbortController | null>(null);
   const [summaryData, setSummaryData] = useState<any | null>(null);
 
   const fetchSummary = async () => {
+    summaryAbortRef.current?.abort();
+    const controller = new AbortController();
+    summaryAbortRef.current = controller;
     try {
       const params = new URLSearchParams();
       if (dateRange) params.set('dateRange', dateRange);
@@ -119,12 +124,19 @@ export default function RecorderHubDashboard() {
         }
       }
 
-      const res = await fetch(`/api/v1/dashboard/summary?${params.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/v1/dashboard/summary?${params.toString()}`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
       if (res.ok) {
         const data = await res.json();
-        setSummaryData(data);
+        if (!controller.signal.aborted) {
+          setSummaryData(data);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
       console.error('Error fetching dashboard summary:', err);
     }
   };
@@ -228,7 +240,10 @@ export default function RecorderHubDashboard() {
         fetchRecentActivities();
       }
     }, 30000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      summaryAbortRef.current?.abort();
+    };
   }, [dateRange, customStartDate, customEndDate, salesRepFilter, teamFilter, isAdmin, isSuperAdmin]);
 
   const activeTeams = teamsList;
@@ -602,39 +617,8 @@ export default function RecorderHubDashboard() {
     if (!canUserAccessCall(c)) return false;
 
     // Date Range Filter
-    if (dateRange !== 'All time') {
-      const callDate = c.startTime ? new Date(c.startTime) : new Date();
-      const now = new Date();
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-
-      if (dateRange === 'Today') {
-        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        if (callDate < startOfToday || callDate > endOfToday) return false;
-      } else if (dateRange === 'Last 24 hours') {
-        const last24h = new Date(now.getTime() - 24 * 3600 * 1000);
-        if (callDate < last24h || callDate > now) return false;
-      } else if (dateRange === 'Yesterday') {
-        const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
-        const endOfYesterday = new Date(startOfToday.getTime() - 1);
-        if (callDate < startOfYesterday || callDate > endOfYesterday) return false;
-      } else if (dateRange === 'This week') {
-        const sevenDaysAgo = new Date(startOfToday.getTime() - 7 * 86400000);
-        if (callDate < sevenDaysAgo) return false;
-      } else if (dateRange === 'This month') {
-        const thirtyDaysAgo = new Date(startOfToday.getTime() - 30 * 86400000);
-        if (callDate < thirtyDaysAgo) return false;
-      } else if (dateRange === 'Custom') {
-        if (customStartDate) {
-          const [sYear, sMonth, sDay] = customStartDate.split('-').map(Number);
-          const startCustom = new Date(sYear, sMonth - 1, sDay, 0, 0, 0, 0);
-          if (callDate < startCustom) return false;
-        }
-        if (customEndDate) {
-          const [eYear, eMonth, eDay] = customEndDate.split('-').map(Number);
-          const endCustom = new Date(eYear, eMonth - 1, eDay, 23, 59, 59, 999);
-          if (callDate > endCustom) return false;
-        }
-      }
+    if (!isDateInRange(c.startTime, dateRange, customStartDate, customEndDate)) {
+      return false;
     }
 
     // Sales Rep / Team Filter
@@ -1187,9 +1171,16 @@ export default function RecorderHubDashboard() {
         {/* Top Header Bar */}
         <header className="flex items-center justify-between pb-8">
           {/* Left Filters */}
-          <div className="flex items-center space-x-6">
+          <div className="flex flex-wrap items-center gap-6">
             <div>
-              <label className="block text-xs font-bold text-slate-900 mb-1.5">Date range</label>
+              <div className="flex items-center space-x-2 mb-1.5">
+                <label className="block text-xs font-bold text-slate-900">Date range</label>
+                {formatDateRangeSpan(dateRange, customStartDate, customEndDate) && (
+                  <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                    {formatDateRangeSpan(dateRange, customStartDate, customEndDate)}
+                  </span>
+                )}
+              </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="relative">
                   <select
@@ -1197,13 +1188,11 @@ export default function RecorderHubDashboard() {
                     onChange={(e) => setDateRange(e.target.value)}
                     className="appearance-none bg-white border border-slate-200 text-slate-800 text-sm font-medium rounded-lg px-4 py-2 pr-8 shadow-sm focus:outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer"
                   >
-                    <option value="This week">This week</option>
-                    <option value="Today">Today</option>
-                    <option value="Last 24 hours">Last 24 hours</option>
-                    <option value="Yesterday">Yesterday</option>
-                    <option value="This month">This month</option>
-                    <option value="All time">All time</option>
-                    <option value="Custom">Custom</option>
+                    {CALL_DATE_RANGE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                   <ChevronDown className="w-4 h-4 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
                 </div>

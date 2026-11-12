@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { connectToDatabase, withDbRetry } from '@/lib/db';
 import { UserSessionModel, AuditLogModel } from '@/lib/models';
 import { getClientIp, parseDevice } from '@/lib/activity-logger';
+import { buildDateMongoFilter } from '@/lib/date-range';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -201,31 +202,9 @@ export async function GET(req: Request) {
 
     // Date filtering based on when session was active
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-
-    if (dateRange === 'Today') {
-      match.lastActiveAt = { $gte: startOfToday, $lte: endOfToday };
-    } else if (dateRange === 'Yesterday') {
-      const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
-      const endOfYesterday = new Date(startOfToday.getTime() - 1);
-      match.lastActiveAt = { $gte: startOfYesterday, $lte: endOfYesterday };
-    } else if (dateRange === 'Last 24 hours') {
-      match.lastActiveAt = { $gte: new Date(now.getTime() - 24 * 3600 * 1000), $lte: now };
-    } else if (dateRange === 'Last 7 days' || dateRange === 'This week') {
-      const sevenDaysAgo = new Date(startOfToday.getTime() - 6 * 86400000);
-      match.lastActiveAt = { $gte: sevenDaysAgo, $lte: endOfToday };
-    } else if (dateRange === 'Last 30 days' || dateRange === 'This month') {
-      const thirtyDaysAgo = new Date(startOfToday.getTime() - 29 * 86400000);
-      match.lastActiveAt = { $gte: thirtyDaysAgo, $lte: endOfToday };
-    } else if (dateRange === 'Custom' && (startDateParam || endDateParam)) {
-      match.lastActiveAt = {};
-      if (startDateParam) {
-        match.lastActiveAt.$gte = new Date(startDateParam + 'T00:00:00.000Z');
-      }
-      if (endDateParam) {
-        match.lastActiveAt.$lte = new Date(endDateParam + 'T23:59:59.999Z');
-      }
+    const dateFilter = buildDateMongoFilter(dateRange, startDateParam, endDateParam, now);
+    if (dateFilter) {
+      match.lastActiveAt = dateFilter;
     }
 
     // Text search filter
@@ -243,7 +222,8 @@ export async function GET(req: Request) {
 
     // Calculate Summary Stats
     const statsPromise = (async () => {
-      const todayQuery = { lastActiveAt: { $gte: startOfToday, $lte: endOfToday } };
+      const todayFilter = buildDateMongoFilter('Today', null, null, now);
+      const todayQuery = todayFilter ? { lastActiveAt: todayFilter } : {};
 
       const [
         allTodaySessions,

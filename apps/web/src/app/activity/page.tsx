@@ -753,7 +753,10 @@ export default function ActivityAuditPage() {
                 <option value="Today">Today</option>
                 <option value="Yesterday">Yesterday</option>
                 <option value="Last 24 hours">Last 24 hours</option>
+                <option value="This week">This week</option>
                 <option value="Last 7 days">Last 7 days</option>
+                <option value="This month">This month</option>
+                <option value="Last month">Last month</option>
                 <option value="Last 30 days">Last 30 days</option>
                 <option value="Custom">Custom Dates</option>
               </select>

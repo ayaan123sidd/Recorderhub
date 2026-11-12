@@ -4,6 +4,7 @@ import { CallModel, UserModel, TeamModel, DeviceModel } from '@/lib/models';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { DASHBOARD_SUMMARY_CACHE_KEY, DASHBOARD_SUMMARY_CACHE_TTL } from '@/lib/cache-service';
 import { INTERNATIONAL_SIM_PHONE_PATTERN, WHATSAPP_DISPOSITION_PATTERN, WHATSAPP_CALL_KEY_PATTERN } from '@recordhub/shared';
+import { buildDateMongoFilter, getISTDateKey } from '@/lib/date-range';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
     const team = searchParams.get('team');
     const channel = searchParams.get('channel');
 
-    const cacheKey = `summary:v2:${dateRange}:${startDateParam || ''}:${endDateParam || ''}:${counselorEmail || ''}:${agentName || ''}:${team || ''}:${channel || ''}`;
+    const cacheKey = `summary:v3:${getISTDateKey()}:${dateRange}:${startDateParam || ''}:${endDateParam || ''}:${counselorEmail || ''}:${agentName || ''}:${team || ''}:${channel || ''}`;
     const cached = await cacheGet<any>(cacheKey);
     if (cached) {
       const res = NextResponse.json(cached);
@@ -46,40 +47,9 @@ export async function GET(req: Request) {
     andConditions.push({ phoneNumber: { $not: /message|messages|unread|mention|group:/i } });
 
     // 1. Date Range Matching
-    if (dateRange !== 'All time') {
-      const now = new Date();
-      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-
-      if (dateRange === 'Today') {
-        const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        andConditions.push({ startTime: { $gte: startOfToday, $lte: endOfToday } });
-      } else if (dateRange === 'Last 24 hours') {
-        const last24h = new Date(now.getTime() - 24 * 3600 * 1000);
-        andConditions.push({ startTime: { $gte: last24h, $lte: now } });
-      } else if (dateRange === 'Yesterday') {
-        const startOfYesterday = new Date(startOfToday.getTime() - 86400000);
-        const endOfYesterday = new Date(startOfToday.getTime() - 1);
-        andConditions.push({ startTime: { $gte: startOfYesterday, $lte: endOfYesterday } });
-      } else if (dateRange === 'This week') {
-        const sevenDaysAgo = new Date(startOfToday.getTime() - 7 * 86400000);
-        andConditions.push({ startTime: { $gte: sevenDaysAgo } });
-      } else if (dateRange === 'This month') {
-        const thirtyDaysAgo = new Date(startOfToday.getTime() - 30 * 86400000);
-        andConditions.push({ startTime: { $gte: thirtyDaysAgo } });
-      } else if (dateRange === 'Custom') {
-        if (startDateParam || endDateParam) {
-          const customDateMatch: any = {};
-          if (startDateParam) {
-            const [sYear, sMonth, sDay] = startDateParam.split('-').map(Number);
-            customDateMatch.$gte = new Date(sYear, sMonth - 1, sDay, 0, 0, 0, 0);
-          }
-          if (endDateParam) {
-            const [eYear, eMonth, eDay] = endDateParam.split('-').map(Number);
-            customDateMatch.$lte = new Date(eYear, eMonth - 1, eDay, 23, 59, 59, 999);
-          }
-          andConditions.push({ startTime: customDateMatch });
-        }
-      }
+    const dateFilter = buildDateMongoFilter(dateRange, startDateParam, endDateParam);
+    if (dateFilter) {
+      andConditions.push({ startTime: dateFilter });
     }
 
     // Counselor / Agent filter

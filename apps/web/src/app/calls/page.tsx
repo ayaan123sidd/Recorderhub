@@ -47,6 +47,7 @@ import {
   PhoneMissed
 } from 'lucide-react';
 import { useAudioPlayer } from '@/contexts/AudioPlayerContext';
+import { CALL_DATE_RANGE_OPTIONS, formatDateRangeSpan } from '@/lib/date-range';
 
 const audioDurationCache = new Map<string, number>();
 
@@ -1367,10 +1368,17 @@ function SalestrailCallsInner() {
         </div>
 
         {/* Top Filter Toolbar (Matching Salestrail Screenshot) */}
-        <div className="flex flex-wrap items-center space-x-6 text-xs font-semibold text-slate-700 pb-2">
+        <div className="flex flex-wrap items-center gap-6 text-xs font-semibold text-slate-700 pb-2">
           {/* Date Range Dropdown */}
           <div className="space-y-1.5">
-            <label className="block text-slate-900 font-bold text-sm">Date range</label>
+            <div className="flex items-center space-x-2">
+              <label className="block text-slate-900 font-bold text-sm">Date range</label>
+              {formatDateRangeSpan(dateRange, customStartDate, customEndDate) && (
+                <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
+                  {formatDateRangeSpan(dateRange, customStartDate, customEndDate)}
+                </span>
+              )}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
                 <select
@@ -1381,13 +1389,11 @@ function SalestrailCallsInner() {
                   }}
                   className="appearance-none bg-white border border-slate-200 text-slate-800 font-medium rounded-xl px-4 py-2.5 pr-8 shadow-sm focus:outline-none min-w-[140px] cursor-pointer hover:border-slate-300 transition-colors"
                 >
-                  <option value="This week">This week</option>
-                  <option value="Today">Today</option>
-                  <option value="Last 24 hours">Last 24 hours</option>
-                  <option value="Yesterday">Yesterday</option>
-                  <option value="This month">This month</option>
-                  <option value="All time">All time</option>
-                  <option value="Custom">Custom</option>
+                  {CALL_DATE_RANGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
                 </select>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3.5 pointer-events-none" />
               </div>

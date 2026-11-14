@@ -101,10 +101,51 @@ export async function generateDailyReportData(targetDate?: Date | string): Promi
       phoneNumber: { $not: /message|messages|unread|mention|group:/i },
     }).lean().exec();
 
-    // Fetch registered counselors to ensure proper name/team mapping (excluding superadmin and dummy)
+    // 1. Identify all Guest (resigned) user profiles so their data is strictly excluded from daily reports
+    const guestUsers = await (UserModel as any)
+      .find({
+        $or: [
+          { role: { $regex: /^guest$/i } },
+          { isGuest: true },
+        ],
+      })
+      .select('email firstName lastName _id')
+      .lean()
+      .exec();
+
+    const guestEmailSet = new Set<string>();
+    const guestNameSet = new Set<string>();
+    const guestIdSet = new Set<string>();
+
+    for (const gu of (guestUsers || [])) {
+      if (gu.email) guestEmailSet.add(gu.email.toLowerCase().trim());
+      const fullName = `${gu.firstName || ''} ${gu.lastName || ''}`.trim().toLowerCase();
+      if (fullName) guestNameSet.add(fullName);
+      if (gu.firstName) guestNameSet.add(gu.firstName.trim().toLowerCase());
+      if (gu._id) guestIdSet.add(gu._id.toString());
+    }
+
+    // Filter calls to strictly exclude any data from Guest (resigned) users
+    const activeCalls = (calls || []).filter((call: any) => {
+      const rawEmail = (call.counselorEmail || '').toLowerCase().trim();
+      const rawName = (call.agentName || call.counselorName || '').trim().toLowerCase();
+      const rawUserId = call.userId ? String(call.userId) : '';
+
+      if (
+        (rawEmail && guestEmailSet.has(rawEmail)) ||
+        (rawName && guestNameSet.has(rawName)) ||
+        (rawUserId && guestIdSet.has(rawUserId))
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    // 2. Fetch active registered counselors to ensure proper name/team mapping (excluding superadmin, dummy, and guest/resigned users)
     const users = await (UserModel as any)
       .find({
-        role: { $ne: 'SUPER_ADMIN' },
+        role: { $nin: ['SUPER_ADMIN', 'GUEST'] },
+        isGuest: { $ne: true },
         email: { $nin: ['superadmin@academically.com', 'dummy@academically.com'] },
       })
       .sort({ firstName: 1 })
@@ -161,7 +202,7 @@ export async function generateDailyReportData(targetDate?: Date | string): Promi
     let whatsappCalls = 0;
     let totalDurationSeconds = 0;
 
-    for (const call of calls) {
+    for (const call of activeCalls) {
       totalCalls++;
 
       const dirUpper = String(call.direction || '').trim().toUpperCase();
@@ -274,7 +315,7 @@ export async function generateDailyReportData(targetDate?: Date | string): Promi
       topPerformers,
     };
 
-    return { data, rawCalls: calls };
+    return { data, rawCalls: activeCalls };
   });
 }
 

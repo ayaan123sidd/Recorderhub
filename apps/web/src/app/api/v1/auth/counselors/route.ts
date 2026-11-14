@@ -136,10 +136,42 @@ export async function PUT(req: Request) {
     const updateData: any = {};
     if (body.firstName !== undefined) updateData.firstName = body.firstName;
     if (body.lastName !== undefined) updateData.lastName = body.lastName;
-    if (body.role !== undefined) updateData.role = body.role;
     if (body.email !== undefined) updateData.email = body.email.toLowerCase();
     if (body.phoneNumber !== undefined) updateData.phoneNumber = body.phoneNumber;
-    if (body.isActive !== undefined) updateData.isActive = body.isActive;
+
+    if (body.isGuest !== undefined) {
+      updateData.isGuest = Boolean(body.isGuest);
+      if (updateData.isGuest) {
+        updateData.role = 'GUEST';
+        updateData.isActive = false;
+        updateData.resignedAt = new Date();
+      } else {
+        updateData.resignedAt = null;
+        if (body.role === 'GUEST') updateData.role = 'COUNSELOR';
+      }
+    }
+
+    if (body.role !== undefined) {
+      updateData.role = body.role;
+      if (body.role === 'GUEST') {
+        updateData.isGuest = true;
+        updateData.isActive = false;
+        if (!updateData.resignedAt) updateData.resignedAt = new Date();
+      } else if (body.isGuest === undefined && body.role !== 'GUEST') {
+        updateData.isGuest = false;
+        updateData.resignedAt = null;
+      }
+    }
+
+    if (body.isActive !== undefined) {
+      updateData.isActive = body.isActive;
+      if (body.isActive === true && updateData.isGuest !== true) {
+        // If reactivating and not explicitly setting guest, make sure isGuest is false
+        if (updateData.role === 'GUEST') updateData.role = 'COUNSELOR';
+        updateData.isGuest = false;
+        updateData.resignedAt = null;
+      }
+    }
 
     const rawPass = body.password || body.pass || body.newPassword;
     if (rawPass && typeof rawPass === 'string' && rawPass.trim().length > 0) {

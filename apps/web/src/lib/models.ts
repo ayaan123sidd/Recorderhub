@@ -10,6 +10,8 @@ const UserSchema = new Schema(
     phoneNumber: { type: String, default: '' },
     organizationId: { type: String, default: '65c1f0000000000000000001' },
     isActive: { type: Boolean, default: true },
+    isGuest: { type: Boolean, default: false },
+    resignedAt: { type: Date },
   },
   { timestamps: true },
 );
@@ -186,6 +188,19 @@ export const TeamModel = mongoose.models.Team || mongoose.model('Team', TeamSche
 export const AppReleaseModel = mongoose.models.AppRelease || mongoose.model('AppRelease', AppReleaseSchema);
 export const AuditLogModel = mongoose.models.AuditLog || mongoose.model('AuditLog', AuditLogSchema);
 export const UserSessionModel = mongoose.models.UserSession || mongoose.model('UserSession', UserSessionSchema);
+
+const SystemSettingSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    value: { type: Schema.Types.Mixed, required: true },
+    description: { type: String, default: '' },
+    updatedBy: { type: String, default: 'System' },
+  },
+  { timestamps: true, collection: 'systemsettings' }
+);
+
+export const SystemSettingModel = mongoose.models.SystemSetting || mongoose.model('SystemSetting', SystemSettingSchema);
+
 
 
 

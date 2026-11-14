@@ -9,7 +9,7 @@ import { ApkReleaseManagerModal } from '@/components/ApkReleaseManagerModal';
 export default function SettingsPage() {
   const { role: userRole, isAdmin, isSuperAdmin } = useUserRole();
   const [crmUrl, setCrmUrl] = useState('https://api.pharmlly.com/v1');
-  const [retentionDays, setRetentionDays] = useState(180);
+  const [retentionDays, setRetentionDays] = useState(365);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -178,8 +178,8 @@ export default function SettingsPage() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block font-semibold text-slate-300">S3 Audio Recording Retention</label>
-                  <span className="text-rose-400 font-mono text-[11px] font-bold">
-                    {retentionDays} Days (~{Math.round(retentionDays / 30)} Months)
+                  <span className="text-emerald-400 font-mono text-[11px] font-bold">
+                    {retentionDays} Days (~{retentionDays >= 365 ? `${retentionDays % 365 === 0 ? Math.round(retentionDays / 365) : (retentionDays / 365).toFixed(1)} Year${retentionDays >= 730 ? 's' : ''}` : `${Math.round(retentionDays / 30)} Months`})
                   </span>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -190,6 +190,18 @@ export default function SettingsPage() {
                     className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white focus:outline-none focus:border-brand-500 font-mono"
                   />
                   <div className="flex items-center space-x-1">
+                    <button
+                      type="button"
+                      onClick={() => setRetentionDays(365)}
+                      className={`px-2.5 py-2 rounded-lg text-[11px] font-bold border transition-colors ${
+                        retentionDays === 365 
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40' 
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
+                      }`}
+                      title="Set to 1 Year (365 Days)"
+                    >
+                      1 Year
+                    </button>
                     <button
                       type="button"
                       onClick={() => setRetentionDays(180)}
@@ -214,22 +226,10 @@ export default function SettingsPage() {
                     >
                       3 Months
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setRetentionDays(365)}
-                      className={`px-2.5 py-2 rounded-lg text-[11px] font-bold border transition-colors ${
-                        retentionDays === 365 
-                          ? 'bg-rose-500/20 text-rose-400 border-rose-500/40' 
-                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white'
-                      }`}
-                      title="Set to 1 Year (365 Days)"
-                    >
-                      1 Year
-                    </button>
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  AWS S3 lifecycle rule automatically expires and permanently purges audio files older than {retentionDays} days.
+                  AWS S3 lifecycle rule automatically expires and permanently purges audio files older than {retentionDays} days. Call metadata and logs in MongoDB remain safely stored for 1 year and beyond.
                 </p>
               </div>
 

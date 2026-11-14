@@ -34,16 +34,16 @@ async function checkAndApplyLifecycle() {
     }
   }
 
-  // 6 months = 180 days
-  const retentionDays = 180;
-  console.log(`Setting 6-month (${retentionDays} days) auto-delete lifecycle expiration rule on bucket: ${bucket}...`);
+  // 1 year = 365 days (configurable via DATA_RETENTION_DAYS)
+  const retentionDays = Number(process.env.DATA_RETENTION_DAYS) || Number(process.env.RECORDING_RETENTION_DAYS) || 365;
+  console.log(`Setting 1-year (${retentionDays} days) auto-delete lifecycle expiration rule on bucket: ${bucket}...`);
 
   const putParams = {
     Bucket: bucket,
     LifecycleConfiguration: {
       Rules: [
         {
-          ID: 'AutoDeleteAudioRecordingsAfter6Months',
+          ID: 'AutoDeleteAudioRecordingsAfter1Year',
           Status: 'Enabled',
           Filter: {
             Prefix: '', // Apply to all recording audio files in the bucket
@@ -64,7 +64,7 @@ async function checkAndApplyLifecycle() {
 
   try {
     await s3.send(new PutBucketLifecycleConfigurationCommand(putParams));
-    console.log(` Successfully configured S3 Bucket Lifecycle: Auto-delete recordings after 180 days (6 months)!`);
+    console.log(` Successfully configured S3 Bucket Lifecycle: Auto-delete recordings after ${retentionDays} days (1 year)!`);
 
     // Verify
     const updatedConfig = await s3.send(new GetBucketLifecycleConfigurationCommand({ Bucket: bucket }));

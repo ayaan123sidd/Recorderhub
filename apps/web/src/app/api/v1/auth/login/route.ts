@@ -42,6 +42,13 @@ export async function POST(req: Request) {
 
     // 1. User found in database
     if (user) {
+      if ((user.role || '').toUpperCase() === 'GUEST' || user.isGuest === true) {
+        return NextResponse.json(
+          { message: 'This account is marked as a Guest profile (resigned). Login credentials cannot be used to log in.' },
+          { status: 403 }
+        );
+      }
+
       if (user.isActive === false) {
         return NextResponse.json(
           { message: 'Your account has been deactivated. Please contact your administrator.' },

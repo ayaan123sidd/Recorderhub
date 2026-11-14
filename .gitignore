@@ -23,6 +23,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .system_generated/
+scratch/
 
 # IDE & System Files
 .DS_Store

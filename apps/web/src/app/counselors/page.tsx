@@ -10,6 +10,8 @@ import {
   Edit2, 
   Trash2, 
   UserCheck, 
+  UserMinus,
+  UserX,
   RefreshCw, 
   X, 
   CheckCircle2, 
@@ -510,6 +512,7 @@ function CounselorsAndTeamsInner() {
     e.preventDefault();
     if (!editingCounselor) return;
     const targetId = getCounselorId(editingCounselor);
+    const isGuestRole = role === 'GUEST';
 
     setCounselors((prev) =>
       prev.map((item) => {
@@ -520,6 +523,9 @@ function CounselorsAndTeamsInner() {
             lastName: lastName.trim() || item.lastName,
             email: email.trim().toLowerCase() || item.email,
             role: role || item.role,
+            isGuest: isGuestRole,
+            isActive: isGuestRole ? false : isActiveStatus,
+            resignedAt: isGuestRole ? (item.resignedAt || new Date()) : null,
           };
         }
         return item;
@@ -531,6 +537,8 @@ function CounselorsAndTeamsInner() {
       lastName: lastName.trim(),
       email: email.trim().toLowerCase(),
       role: role,
+      isGuest: isGuestRole,
+      isActive: isGuestRole ? false : isActiveStatus,
     };
 
     if (editNewPassword.trim()) {
@@ -556,11 +564,83 @@ function CounselorsAndTeamsInner() {
           actionCategory: 'USER_MANAGEMENT',
           description: `Updated profile for user ${firstName} ${lastName} (${email}, Role: ${role})`,
           path: '/counselors?view=users',
-          details: { updatedEmail: email, role },
+          details: { updatedEmail: email, role, isGuest: isGuestRole },
         });
       }).catch(() => {});
     } catch (err: any) {
       console.error('Error updating counselor:', err);
+    }
+  };
+
+  const handleToggleGuest = async (counselor: any) => {
+    const targetId = getCounselorId(counselor);
+    const displayName = `${counselor.firstName || ''} ${counselor.lastName || ''}`.trim() || counselor.email || 'Counselor';
+    const isCurrentlyGuest = Boolean(counselor.isGuest || (counselor.role || '').toUpperCase() === 'GUEST');
+
+    if (isCurrentlyGuest) {
+      if (!confirm(`Restore "${displayName}" as an Active Counselor?\n\n- Re-enables account login access\n- Includes counselor calls in future daily email reports\n- Restores profile status to Active`)) return;
+
+      setCounselors((prev) =>
+        prev.map((c) => {
+          if (getCounselorId(c) === targetId || c.email === counselor.email) {
+            return { ...c, role: 'SALES', isGuest: false, isActive: true, resignedAt: null };
+          }
+          return c;
+        })
+      );
+      setToastMessage(`Restored ${displayName} as Active Counselor!`);
+
+      try {
+        await fetch(`/api/v1/auth/counselors?id=${encodeURIComponent(targetId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'SALES', isGuest: false, isActive: true }),
+        });
+
+        import('@/lib/activity-tracker').then(({ trackClientActivity }) => {
+          trackClientActivity({
+            action: 'RESTORE_USER',
+            actionCategory: 'USER_MANAGEMENT',
+            description: `Restored user ${displayName} (${counselor.email}) from Guest profile to Active Counselor`,
+            path: '/counselors?view=users',
+            details: { email: counselor.email },
+          });
+        }).catch(() => {});
+      } catch (err) {
+        console.error('Error restoring counselor:', err);
+      }
+    } else {
+      if (!confirm(`Mark "${displayName}" as Guest (Resigned)?\n\n✅ Call logs and S3 recordings will NOT be deleted\n✅ Historical data remains safely preserved in dashboard\n⛔ User credentials CANNOT be used to log in\n⛔ Data will be EXCLUDED from future daily email reports`)) return;
+
+      setCounselors((prev) =>
+        prev.map((c) => {
+          if (getCounselorId(c) === targetId || c.email === counselor.email) {
+            return { ...c, role: 'GUEST', isGuest: true, isActive: false, resignedAt: new Date() };
+          }
+          return c;
+        })
+      );
+      setToastMessage(`Marked ${displayName} as Guest (Resigned - Historical data preserved)`);
+
+      try {
+        await fetch(`/api/v1/auth/counselors?id=${encodeURIComponent(targetId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'GUEST', isGuest: true, isActive: false }),
+        });
+
+        import('@/lib/activity-tracker').then(({ trackClientActivity }) => {
+          trackClientActivity({
+            action: 'MARK_GUEST_USER',
+            actionCategory: 'USER_MANAGEMENT',
+            description: `Marked user ${displayName} (${counselor.email}) as Guest profile (resigned)`,
+            path: '/counselors?view=users',
+            details: { email: counselor.email },
+          });
+        }).catch(() => {});
+      } catch (err) {
+        console.error('Error marking counselor as guest:', err);
+      }
     }
   };
 
@@ -632,7 +712,7 @@ function CounselorsAndTeamsInner() {
   const handleDeleteCounselor = async (counselor: any) => {
     const targetId = getCounselorId(counselor);
     const displayName = (counselor.firstName || counselor.email || 'Counselor').trim();
-    if (!confirm(`Are you sure you want to delete counselor "${displayName}"?\n\nThis will permanently delete:\n- Counselor Account\n- All associated Call Logs from database\n- All associated Audio Recordings from AWS S3 storage`)) return;
+    if (!confirm(`⚠️ PERMANENT DELETE WARNING for "${displayName}":\n\nAre you sure you want to PERMANENTLY delete this user?\n\nThis will permanently remove:\n- Counselor Account\n- All associated Call Logs from database\n- All associated Audio Recordings from AWS S3 storage\n\n💡 TIP: If the user has resigned from the company, click Cancel and use "Mark as Guest" instead! Guest profiles keep all historical recordings and call logs safely preserved forever while disabling login and excluding them from daily reports.`)) return;
 
     setCounselors((prev) =>
       prev.filter((item) => getCounselorId(item) !== targetId && item.email !== counselor.email)
@@ -668,7 +748,9 @@ function CounselorsAndTeamsInner() {
     setFirstName(counselor.firstName || '');
     setLastName(counselor.lastName || '');
     setEmail(counselor.email || '');
-    setRole(counselor.role || 'COUNSELOR');
+    const isG = Boolean(counselor.isGuest || (counselor.role || '').toUpperCase() === 'GUEST');
+    setRole(isG ? 'GUEST' : (counselor.role || 'COUNSELOR'));
+    setIsActiveStatus(!isG && counselor.isActive !== false);
     setEditNewPassword('');
     setShowEditPassword(false);
   };
@@ -678,6 +760,7 @@ function CounselorsAndTeamsInner() {
     setLastName('');
     setEmail('');
     setRole('COUNSELOR');
+    setIsActiveStatus(true);
     setPassword('Academically@01');
     setEditNewPassword('');
     setShowEditPassword(false);
@@ -703,16 +786,24 @@ function CounselorsAndTeamsInner() {
       (c.role && c.role.toLowerCase().includes(query));
 
     const roleUpper = (c.role || '').toUpperCase();
+    const isGuestUser = Boolean(c.isGuest || roleUpper === 'GUEST');
+
     const matchesRole =
       userRoleFilter === 'All' ||
-      roleUpper === userRoleFilter.toUpperCase() ||
-      (userRoleFilter === 'SALES' && (roleUpper === 'COUNSELOR' || roleUpper === 'AGENT' || roleUpper === 'SALES_AGENT')) ||
-      (userRoleFilter === 'ADMIN' && roleUpper === 'COMPANY_ADMIN');
+      (userRoleFilter === 'GUEST' && isGuestUser) ||
+      (!isGuestUser && (
+        roleUpper === userRoleFilter.toUpperCase() ||
+        (userRoleFilter === 'SALES' && (roleUpper === 'COUNSELOR' || roleUpper === 'AGENT' || roleUpper === 'SALES_AGENT')) ||
+        (userRoleFilter === 'ADMIN' && roleUpper === 'COMPANY_ADMIN') ||
+        (userRoleFilter === 'MANAGER' && (roleUpper === 'MANAGER' || roleUpper === 'SALES_MANAGER')) ||
+        (userRoleFilter === 'TEAM_LEAD' && roleUpper === 'TEAM_LEAD')
+      ));
 
     const matchesStatus =
       userStatusFilter === 'All' ||
-      (userStatusFilter === 'Active' && c.isActive !== false) ||
-      (userStatusFilter === 'Inactive' && c.isActive === false);
+      (userStatusFilter === 'Guest' && isGuestUser) ||
+      (userStatusFilter === 'Active' && !isGuestUser && c.isActive !== false) ||
+      (userStatusFilter === 'Inactive' && !isGuestUser && c.isActive === false);
 
     return matchesSearch && matchesRole && matchesStatus;
   });
@@ -977,6 +1068,7 @@ function CounselorsAndTeamsInner() {
                     <option value="ADMIN">Admin</option>
                     <option value="MANAGER">Manager</option>
                     <option value="TEAM_LEAD">Team Lead</option>
+                    <option value="GUEST">Guest (Resigned)</option>
                   </select>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
                 </div>
@@ -990,6 +1082,7 @@ function CounselorsAndTeamsInner() {
                     <option value="All">All Statuses</option>
                     <option value="Active">Active</option>
                     <option value="Inactive">Inactive</option>
+                    <option value="Guest">Guest (Resigned)</option>
                   </select>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-3 pointer-events-none" />
                 </div>
@@ -1058,6 +1151,7 @@ function CounselorsAndTeamsInner() {
                       filteredCounselors.map((c) => {
                         const fullName = `${c.firstName || ''} ${c.lastName || ''}`.trim() || c.name || c.email?.split('@')[0] || 'User';
                         const roleUpper = (c.role || '').toUpperCase();
+                        const isGuestUser = Boolean(c.isGuest || roleUpper === 'GUEST');
                         const isRoleAdmin = roleUpper === 'ADMIN' || roleUpper === 'COMPANY_ADMIN';
                         const isRoleSales = roleUpper === 'SALES' || roleUpper === 'COUNSELOR' || roleUpper === 'AGENT' || roleUpper === 'SALES_AGENT';
                         const isRoleManager = roleUpper === 'MANAGER' || roleUpper === 'SALES_MANAGER';
@@ -1067,7 +1161,14 @@ function CounselorsAndTeamsInner() {
                           <tr key={c._id || c.email || c.id} className="hover:bg-slate-50/50 transition-colors">
                             {/* NAME */}
                             <td className="py-5 pl-8 font-bold text-slate-900 text-sm whitespace-nowrap">
-                              {fullName}
+                              <div className="flex items-center space-x-2">
+                                <span>{fullName}</span>
+                                {isGuestUser && (
+                                  <span className="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-extrabold uppercase">
+                                    Resigned
+                                  </span>
+                                )}
+                              </div>
                             </td>
 
                             {/* EMAIL */}
@@ -1077,7 +1178,11 @@ function CounselorsAndTeamsInner() {
 
                             {/* ROLE */}
                             <td className="py-5 px-4 whitespace-nowrap">
-                              {isRoleAdmin ? (
+                              {isGuestUser ? (
+                                <span className="inline-flex items-center justify-center bg-purple-50 text-purple-700 border border-purple-200 px-3 py-0.5 rounded text-xs font-bold uppercase tracking-wide">
+                                  GUEST
+                                </span>
+                              ) : isRoleAdmin ? (
                                 <span className="inline-flex items-center justify-center bg-[#e0f2fe]/70 text-[#0284c7] border border-[#bae6fd] px-3 py-0.5 rounded text-xs font-bold uppercase tracking-wide">
                                   ADMIN
                                 </span>
@@ -1102,7 +1207,15 @@ function CounselorsAndTeamsInner() {
 
                             {/* STATUS */}
                             <td className="py-5 px-4 whitespace-nowrap">
-                              {isRoleAdmin ? (
+                              {isGuestUser ? (
+                                <span
+                                  className="inline-flex items-center space-x-1.5 px-3.5 py-1 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 text-xs font-bold shadow-2xs"
+                                  title={c.resignedAt ? `Resigned on ${new Date(c.resignedAt).toLocaleDateString()} (Data preserved, login disabled)` : 'Guest user (Data preserved, login disabled)'}
+                                >
+                                  <UserMinus className="w-4 h-4 stroke-[2.2]" />
+                                  <span>Guest (Resigned)</span>
+                                </span>
+                              ) : isRoleAdmin ? (
                                 <span className="text-slate-300 font-medium text-sm select-none pl-1">—</span>
                               ) : c.isActive !== false ? (
                                 <span className="inline-flex items-center space-x-1.5 px-3.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50/50 text-emerald-600 text-xs font-bold shadow-2xs">
@@ -1179,25 +1292,44 @@ function CounselorsAndTeamsInner() {
                             {/* ACTIONS */}
                             <td className="py-5 pr-8 text-right whitespace-nowrap">
                               {hasAdminAccess ? (
-                                <div className="flex items-center justify-end space-x-5">
+                                <div className="flex items-center justify-end space-x-3">
+                                  {/* Quick Toggle Guest Status (Resigned vs Active) */}
+                                  {isGuestUser ? (
+                                    <button
+                                      onClick={() => handleToggleGuest(c)}
+                                      title="Restore Active Counselor (Re-enable login & daily reports)"
+                                      className="text-purple-600 hover:text-purple-800 transition-colors p-1.5 rounded-md hover:bg-purple-100 cursor-pointer"
+                                    >
+                                      <UserCheck className="w-4 h-4 stroke-[2]" />
+                                    </button>
+                                  ) : !isRoleAdmin ? (
+                                    <button
+                                      onClick={() => handleToggleGuest(c)}
+                                      title="Mark as Guest (Resigned - Preserves all call logs & recordings)"
+                                      className="text-slate-400 hover:text-purple-600 transition-colors p-1.5 rounded-md hover:bg-purple-50 cursor-pointer"
+                                    >
+                                      <UserMinus className="w-4 h-4 stroke-[1.75]" />
+                                    </button>
+                                  ) : null}
+
                                   <button
                                     onClick={() => openEditModal(c)}
                                     title="Edit User"
-                                    className="text-slate-400 hover:text-slate-700 transition-colors p-1 rounded-md hover:bg-slate-100 cursor-pointer"
+                                    className="text-slate-400 hover:text-slate-700 transition-colors p-1.5 rounded-md hover:bg-slate-100 cursor-pointer"
                                   >
                                     <Pencil className="w-4 h-4 stroke-[1.75]" />
                                   </button>
                                   <button
                                     onClick={() => openChangePasswordModal(c)}
                                     title="Change Password"
-                                    className="text-slate-400 hover:text-slate-700 transition-colors p-1 rounded-md hover:bg-slate-100 cursor-pointer"
+                                    className="text-slate-400 hover:text-slate-700 transition-colors p-1.5 rounded-md hover:bg-slate-100 cursor-pointer"
                                   >
                                     <Shield className="w-4 h-4 stroke-[1.75]" />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteCounselor(c)}
                                     title="Delete User"
-                                    className="text-slate-400 hover:text-rose-600 transition-colors p-1 rounded-md hover:bg-rose-50 cursor-pointer"
+                                    className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 rounded-md hover:bg-rose-50 cursor-pointer"
                                   >
                                     <Trash2 className="w-4 h-4 stroke-[1.75]" />
                                   </button>
@@ -1718,28 +1850,59 @@ function CounselorsAndTeamsInner() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Role</label>
                     <select
                       value={role}
-                      onChange={(e) => setRole(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRole(val);
+                        if (val === 'GUEST') {
+                          setIsActiveStatus(false);
+                        }
+                      }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer"
                     >
                       <option value="SALES">Sales</option>
                       <option value="ADMIN">Admin</option>
                       <option value="MANAGER">Manager</option>
                       <option value="TEAM_LEAD">Team Lead</option>
+                      <option value="GUEST">Guest (Resigned)</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Account Status</label>
                     <select
-                      value={isActiveStatus ? 'ACTIVE' : 'INACTIVE'}
-                      onChange={(e) => setIsActiveStatus(e.target.value === 'ACTIVE')}
+                      value={role === 'GUEST' ? 'GUEST' : isActiveStatus ? 'ACTIVE' : 'INACTIVE'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'GUEST') {
+                          setRole('GUEST');
+                          setIsActiveStatus(false);
+                        } else {
+                          if (role === 'GUEST') setRole('SALES');
+                          setIsActiveStatus(val === 'ACTIVE');
+                        }
+                      }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer"
                     >
                       <option value="ACTIVE">Active</option>
                       <option value="INACTIVE">Inactive</option>
+                      <option value="GUEST">Guest (Resigned - Preserves Data)</option>
                     </select>
                   </div>
                 </div>
+
+                {role === 'GUEST' && (
+                  <div className="bg-purple-50 border border-purple-200 text-purple-900 p-3 rounded-xl text-xs space-y-1">
+                    <div className="flex items-center space-x-1.5 font-bold text-purple-800">
+                      <UserMinus className="w-4 h-4 text-purple-600" />
+                      <span>Guest Profile (Resigned Employee)</span>
+                    </div>
+                    <p className="text-[11px] text-purple-700 leading-relaxed">
+                      • All historical call logs and S3 recordings remain safely preserved.<br />
+                      • Account login credentials cannot be used to log in.<br />
+                      • User data will be excluded from future daily email reports.
+                    </p>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Initial Password</label>
@@ -1833,28 +1996,59 @@ function CounselorsAndTeamsInner() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Assigned Role</label>
                     <select
                       value={role}
-                      onChange={(e) => setRole(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setRole(val);
+                        if (val === 'GUEST') {
+                          setIsActiveStatus(false);
+                        }
+                      }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer"
                     >
                       <option value="SALES">Sales</option>
                       <option value="ADMIN">Admin</option>
                       <option value="MANAGER">Manager</option>
                       <option value="TEAM_LEAD">Team Lead</option>
+                      <option value="GUEST">Guest (Resigned)</option>
                     </select>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">Account Status</label>
                     <select
-                      value={isActiveStatus ? 'ACTIVE' : 'INACTIVE'}
-                      onChange={(e) => setIsActiveStatus(e.target.value === 'ACTIVE')}
+                      value={role === 'GUEST' ? 'GUEST' : isActiveStatus ? 'ACTIVE' : 'INACTIVE'}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === 'GUEST') {
+                          setRole('GUEST');
+                          setIsActiveStatus(false);
+                        } else {
+                          if (role === 'GUEST') setRole('SALES');
+                          setIsActiveStatus(val === 'ACTIVE');
+                        }
+                      }}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-rose-500/20 cursor-pointer"
                     >
                       <option value="ACTIVE">Active</option>
                       <option value="INACTIVE">Inactive</option>
+                      <option value="GUEST">Guest (Resigned - Preserves Data)</option>
                     </select>
                   </div>
                 </div>
+
+                {role === 'GUEST' && (
+                  <div className="bg-purple-50 border border-purple-200 text-purple-900 p-3 rounded-xl text-xs space-y-1">
+                    <div className="flex items-center space-x-1.5 font-bold text-purple-800">
+                      <UserMinus className="w-4 h-4 text-purple-600" />
+                      <span>Guest Profile (Resigned Employee)</span>
+                    </div>
+                    <p className="text-[11px] text-purple-700 leading-relaxed">
+                      • All historical call logs and S3 recordings remain safely preserved.<br />
+                      • Account login credentials cannot be used to log in.<br />
+                      • User data will be excluded from future daily email reports.
+                    </p>
+                  </div>
+                )}
 
                 {/* Optional Change Password in Edit Modal */}
                 <div className="pt-1 border-t border-slate-100">

@@ -46,6 +46,16 @@ export async function POST(req: Request) {
       );
     }
 
+    if ((user.role || '').toUpperCase() === 'GUEST' || user.isGuest === true) {
+      return NextResponse.json(
+        { valid: false, message: 'This account is marked as a Guest profile (resigned). Access is disabled.' },
+        {
+          status: 403,
+          headers: { 'Access-Control-Allow-Origin': '*' }
+        }
+      );
+    }
+
     if (user.isActive === false) {
       return NextResponse.json(
         { valid: false, message: 'User account has been deactivated by Admin.' },

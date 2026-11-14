@@ -21,8 +21,8 @@ RecordHub uses MongoDB with Mongoose ODM. All collection schemas strictly enforc
 * `office_hours`: `{ start: "09:30", end: "18:30", daysOfWeek: [1,2,3,4,5,6] }`
 * `allowed_tracking_types`: `["INCOMING", "OUTGOING", "MISSED", "REJECTED"]`
 * `private_call_policy_enabled`: Boolean
-* `recording_retention_days`: Number (e.g., 180)
-* `transcript_retention_days`: Number (e.g., 365)
+* `recording_retention_days`: Number (e.g., 365 - 1 Year)
+* `transcript_retention_days`: Number (e.g., 365 - 1 Year)
 * `auto_redact_pii`: Boolean
 
 ### 1.3 `users`
